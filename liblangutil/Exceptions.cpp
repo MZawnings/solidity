@@ -41,6 +41,21 @@ Error::Error(
 {
 	switch (m_type)
 	{
+	case Type::IOError:
+		m_typeName = "IOError";
+		break;
+	case Type::FatalError:
+		m_typeName = "FatalError";
+		break;
+	case Type::Exception:
+		m_typeName = "Exception";
+		break;
+	case Type::JSONError:
+		m_typeName = "JSONError";
+		break;
+	case Type::InternalCompilerError:
+		m_typeName = "InternalCompilerError";
+		break;
 	case Type::CodeGenerationError:
 		m_typeName = "CodeGenerationError";
 		break;
@@ -62,7 +77,20 @@ Error::Error(
 	case Type::TypeError:
 		m_typeName = "TypeError";
 		break;
-	case Type::Warning:
+	case Type::CompilerError:
+		m_typeName = "CompilerError";
+		break;
+	case Type::UnimplementedFeatureError:
+		m_typeName = "UnimplementedFeatureError";
+		break;
+	case Type::YulException:
+		m_typeName = "YulException";
+		break;
+	case Type::SMTLogicException:
+		m_typeName = "SMTLogicException";
+		break;
+	default:
+		solAssert(_type == Type::Warning);
 		m_typeName = "Warning";
 		break;
 	}
