@@ -47,10 +47,10 @@ contract C {
 // ----
 // test() -> 0x20, 0x14, "[a called][b called]"
 // gas irOptimized: 116724
-// gas legacy: 119056
+// gas legacy: 119144
 // gas legacyOptimized: 117043
 // test2() -> 0x20, 0x14, "[b called][a called]"
 // test3() -> 0x20, 0x14, "[b called][a called]"
 // gas irOptimized: 103304
-// gas legacy: 102840
+// gas legacy: 102928
 // gas legacyOptimized: 101728

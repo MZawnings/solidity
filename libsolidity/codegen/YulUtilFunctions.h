@@ -73,7 +73,8 @@ public:
 
 	/// @returns a function that copies raw bytes of dynamic length from calldata
 	/// or memory to memory.
-	/// Pads with zeros and might write more than exactly length.
+	/// Pads with zeros up to the 32 byte boundary after the specified length
+	/// signature: (src, dst, length) ->
 	std::string copyToMemoryFunction(bool _fromCalldata);
 
 	/// @returns the name of a function that copies a string literal to memory

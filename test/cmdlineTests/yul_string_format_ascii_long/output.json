@@ -88,6 +88,13 @@ object \"C_11\" {
                 updated_pos := add(pos, 0x20)
             }
 
+            function shift_left_dynamic(bits, value) -> newValue {
+                newValue :=
+
+                shl(bits, value)
+
+            }
+
             function copy_memory_to_memory(src, dst, length) {
                 let i := 0
                 for { } lt(i, length) { i := add(i, 32) }
@@ -96,8 +103,10 @@ object \"C_11\" {
                 }
                 if gt(i, length)
                 {
-                    // clear end
-                    mstore(add(dst, length), 0)
+                    // clear up to 32 byte boundary
+                    let endPos := add(dst, length)
+                    let mask := shift_left_dynamic(not(0), sub(0x20, and(endPos, 0x1F)))
+                    mstore(endPos, and(mload(endPos), mask))
                 }
             }
 

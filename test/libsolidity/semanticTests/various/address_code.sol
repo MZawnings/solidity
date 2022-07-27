@@ -17,7 +17,7 @@ contract C {
 // ----
 // constructor() ->
 // gas irOptimized: 177507
-// gas legacy: 249207
+// gas legacy: 256983
 // gas legacyOptimized: 157489
 // initCode() -> 0x20, 0
 // f() -> true

@@ -24,6 +24,6 @@ contract Creator {
 }
 // ----
 // f(uint256,bytes): 7, 0x40, 78, "abcdefghijklmnopqrstuvwxyzabcdef", "ghijklmnopqrstuvwxyzabcdefghijkl", "mnopqrstuvwxyz" -> 7, "h"
-// gas irOptimized: 282398
-// gas legacy: 429047
-// gas legacyOptimized: 297958
+// gas irOptimized: 286052
+// gas legacy: 442973
+// gas legacyOptimized: 300202
