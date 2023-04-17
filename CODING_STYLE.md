@@ -55,6 +55,7 @@ To set indentation and tab width settings uniformly, the repository contains an 
 3. All symbols should be declared in a namespace except for final applications.
 4. Use anonymous namespaces for helpers whose scope is a cpp file only.
 5. Preprocessor symbols should be prefixed with the namespace in all-caps and an underscore.
+6. Do not use `std::` qualifier in cpp files (see 2.), except for `std::move` and `std::forward`, which will otherwise cause the `check_style` step to fail.
 
 Only in the header:
 ```cpp
@@ -179,7 +180,7 @@ for (map<ComplexTypeOne, ComplexTypeTwo>::iterator i = l.begin(); i != l.end(); 
 
 ## 9. Naming
 
-1. Avoid unpronouncable names.
+1. Avoid unpronounceable names.
 2. Names should be shortened only if they are extremely common, but shortening should be generally avoided
 3. Avoid prefixes of initials (e.g. do not use `IMyInterface`, `CMyImplementation`)
 4. Find short, memorable & (at least semi-) descriptive names for commonly used classes or name-fragments:

@@ -20,6 +20,7 @@
  */
 
 #include <test/tools/yulInterpreter/Interpreter.h>
+#include <test/tools/yulInterpreter/Inspector.h>
 
 #include <libyul/AsmAnalysisInfo.h>
 #include <libyul/AsmAnalysis.h>
@@ -58,6 +59,7 @@ pair<shared_ptr<Block>, shared_ptr<AsmAnalysisInfo>> parse(string const& _source
 {
 	YulStack stack(
 		langutil::EVMVersion(),
+		nullopt,
 		YulStack::Language::StrictAssembly,
 		solidity::frontend::OptimiserSettings::none(),
 		DebugInfoSelection::Default()
@@ -74,7 +76,7 @@ pair<shared_ptr<Block>, shared_ptr<AsmAnalysisInfo>> parse(string const& _source
 	}
 }
 
-void interpret(string const& _source)
+void interpret(string const& _source, bool _inspect, bool _disableExternalCalls)
 {
 	shared_ptr<Block> ast;
 	shared_ptr<AsmAnalysisInfo> analysisInfo;
@@ -87,7 +89,12 @@ void interpret(string const& _source)
 	try
 	{
 		Dialect const& dialect(EVMDialect::strictAssemblyForEVMObjects(langutil::EVMVersion{}));
-		Interpreter::run(state, dialect, *ast, /*disableMemoryTracing=*/false);
+
+		if (_inspect)
+			InspectedInterpreter::run(std::make_shared<Inspector>(_source, state), state, dialect, *ast, _disableExternalCalls, /*disableMemoryTracing=*/false);
+
+		else
+			Interpreter::run(state, dialect, *ast, _disableExternalCalls, /*disableMemoryTracing=*/false);
 	}
 	catch (InterpreterTerminatedGeneric const&)
 	{
@@ -110,6 +117,8 @@ Allowed options)",
 		po::options_description::m_default_line_length - 23);
 	options.add_options()
 		("help", "Show this help screen.")
+		("enable-external-calls", "Enable external calls")
+		("interactive", "Run interactive")
 		("input-file", po::value<vector<string>>(), "input file");
 	po::positional_options_description filesPositions;
 	filesPositions.add("input-file", -1);
@@ -153,7 +162,7 @@ Allowed options)",
 		else
 			input = readUntilEnd(cin);
 
-		interpret(input);
+		interpret(input, arguments.count("interactive"), !arguments.count("enable-external-calls"));
 	}
 
 	return 0;

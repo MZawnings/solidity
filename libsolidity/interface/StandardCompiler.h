@@ -77,12 +77,14 @@ private:
 		std::map<std::string, std::string> sources;
 		std::map<util::h256, std::string> smtLib2Responses;
 		langutil::EVMVersion evmVersion;
+		std::optional<uint8_t> eofVersion;
 		std::vector<ImportRemapper::Remapping> remappings;
 		RevertStrings revertStrings = RevertStrings::Default;
 		OptimiserSettings optimiserSettings = OptimiserSettings::minimal();
 		std::optional<langutil::DebugInfoSelection> debugInfoSelection;
 		std::map<std::string, util::h160> libraries;
 		bool metadataLiteralSources = false;
+		CompilerStack::MetadataFormat metadataFormat = CompilerStack::defaultMetadataFormat();
 		CompilerStack::MetadataHash metadataHash = CompilerStack::MetadataHash::IPFS;
 		Json::Value outputSelection;
 		ModelCheckerSettings modelCheckerSettings = ModelCheckerSettings{};

@@ -37,8 +37,6 @@
 
 #include <boost/algorithm/string/join.hpp>
 
-#include <range/v3/algorithm/sort.hpp>
-
 #include <utility>
 #include <vector>
 #include <algorithm>
@@ -47,6 +45,7 @@
 #include <range/v3/view/map.hpp>
 
 using namespace std;
+using namespace std::string_literals;
 using namespace solidity::langutil;
 
 namespace
@@ -140,7 +139,7 @@ Json::Value ASTJsonExporter::sourceLocationsToJson(vector<SourceLocation> const&
 
 string ASTJsonExporter::namePathToString(std::vector<ASTString> const& _namePath)
 {
-	return boost::algorithm::join(_namePath, ".");
+	return boost::algorithm::join(_namePath, "."s);
 }
 
 Json::Value ASTJsonExporter::typePointerToJson(Type const* _tp, bool _withoutDataLocation)
@@ -331,22 +330,34 @@ bool ASTJsonExporter::visit(UsingForDirective const& _node)
 	vector<pair<string, Json::Value>> attributes = {
 		make_pair("typeName", _node.typeName() ? toJson(*_node.typeName()) : Json::nullValue)
 	};
+
 	if (_node.usesBraces())
 	{
 		Json::Value functionList;
-		for (auto const& function: _node.functionsOrLibrary())
+		for (auto&& [function, op]: _node.functionsAndOperators())
 		{
 			Json::Value functionNode;
-			functionNode["function"] = toJson(*function);
-			functionList.append(move(functionNode));
+			if (!op.has_value())
+				functionNode["function"] = toJson(*function);
+			else
+			{
+				functionNode["definition"] = toJson(*function);
+				functionNode["operator"] = string(TokenTraits::toString(*op));
+			}
+			functionList.append(std::move(functionNode));
 		}
-		attributes.emplace_back("functionList", move(functionList));
+		attributes.emplace_back("functionList", std::move(functionList));
 	}
 	else
-		attributes.emplace_back("libraryName", toJson(*_node.functionsOrLibrary().front()));
+	{
+		auto const& functionAndOperators = _node.functionsAndOperators();
+		solAssert(_node.functionsAndOperators().size() == 1);
+		solAssert(!functionAndOperators.front().second.has_value());
+		attributes.emplace_back("libraryName", toJson(*(functionAndOperators.front().first)));
+	}
 	attributes.emplace_back("global", _node.global());
 
-	setJsonNode(_node, "UsingForDirective", move(attributes));
+	setJsonNode(_node, "UsingForDirective", std::move(attributes));
 
 	return false;
 }
@@ -373,6 +384,7 @@ bool ASTJsonExporter::visit(EnumDefinition const& _node)
 	std::vector<pair<string, Json::Value>> attributes = {
 		make_pair("name", _node.name()),
 		make_pair("nameLocation", sourceLocationToString(_node.nameLocation())),
+		make_pair("documentation", _node.documentation() ? toJson(*_node.documentation()) : Json::nullValue),
 		make_pair("members", toJson(_node.members()))
 	};
 
@@ -457,6 +469,10 @@ bool ASTJsonExporter::visit(FunctionDefinition const& _node)
 		attributes.emplace_back("functionSelector", _node.externalIdentifierHex());
 	if (!_node.annotation().baseFunctions.empty())
 		attributes.emplace_back(make_pair("baseFunctions", getContainerIds(_node.annotation().baseFunctions, true)));
+
+	if (_node.annotation().internalFunctionID.set())
+		attributes.emplace_back("internalFunctionID", *_node.annotation().internalFunctionID);
+
 	setJsonNode(_node, "FunctionDefinition", std::move(attributes));
 	return false;
 }
@@ -520,7 +536,7 @@ bool ASTJsonExporter::visit(ModifierInvocation const& _node)
 		else if (dynamic_cast<ContractDefinition const*>(declaration))
 			attributes.emplace_back("kind", "baseConstructorSpecifier");
 	}
-	setJsonNode(_node, "ModifierInvocation", move(attributes));
+	setJsonNode(_node, "ModifierInvocation", std::move(attributes));
 	return false;
 }
 
@@ -600,7 +616,11 @@ bool ASTJsonExporter::visit(Mapping const& _node)
 {
 	setJsonNode(_node, "Mapping", {
 		make_pair("keyType", toJson(_node.keyType())),
+		make_pair("keyName", _node.keyName()),
+		make_pair("keyNameLocation", sourceLocationToString(_node.keyNameLocation())),
 		make_pair("valueType", toJson(_node.valueType())),
+		make_pair("valueName", _node.valueName()),
+		make_pair("valueNameLocation", sourceLocationToString(_node.valueNameLocation())),
 		make_pair("typeDescriptions", typePointerToJson(_node.annotation().type, true))
 	});
 	return false;
@@ -629,7 +649,7 @@ bool ASTJsonExporter::visit(InlineAssembly const& _node)
 
 	Json::Value externalReferencesJson = Json::arrayValue;
 
-	ranges::sort(externalReferences);
+	std::sort(externalReferences.begin(), externalReferences.end());
 	for (Json::Value& it: externalReferences | ranges::views::values)
 		externalReferencesJson.append(std::move(it));
 
@@ -647,9 +667,9 @@ bool ASTJsonExporter::visit(InlineAssembly const& _node)
 				flags.append(*flag);
 			else
 				flags.append(Json::nullValue);
-		attributes.emplace_back(make_pair("flags", move(flags)));
+		attributes.emplace_back(make_pair("flags", std::move(flags)));
 	}
-	setJsonNode(_node, "InlineAssembly", move(attributes));
+	setJsonNode(_node, "InlineAssembly", std::move(attributes));
 
 	return false;
 }
@@ -827,6 +847,9 @@ bool ASTJsonExporter::visit(UnaryOperation const& _node)
 		make_pair("operator", TokenTraits::toString(_node.getOperator())),
 		make_pair("subExpression", toJson(_node.subExpression()))
 	};
+	// NOTE: This annotation is guaranteed to be set but only if we didn't stop at the parsing stage.
+	if (_node.annotation().userDefinedFunction.set() && *_node.annotation().userDefinedFunction != nullptr)
+		attributes.emplace_back("function", nodeId(**_node.annotation().userDefinedFunction));
 	appendExpressionAttributes(attributes, _node.annotation());
 	setJsonNode(_node, "UnaryOperation", std::move(attributes));
 	return false;
@@ -840,6 +863,9 @@ bool ASTJsonExporter::visit(BinaryOperation const& _node)
 		make_pair("rightExpression", toJson(_node.rightExpression())),
 		make_pair("commonType", typePointerToJson(_node.annotation().commonType)),
 	};
+	// NOTE: This annotation is guaranteed to be set but only if we didn't stop at the parsing stage.
+	if (_node.annotation().userDefinedFunction.set() && *_node.annotation().userDefinedFunction != nullptr)
+		attributes.emplace_back("function", nodeId(**_node.annotation().userDefinedFunction));
 	appendExpressionAttributes(attributes, _node.annotation());
 	setJsonNode(_node, "BinaryOperation", std::move(attributes));
 	return false;

@@ -30,7 +30,6 @@
 #include <test/libsolidity/util/SoltestTypes.h>
 
 #include <libsolutil/CommonIO.h>
-#include <libsolutil/FunctionSelector.h>
 
 #include <liblangutil/Exceptions.h>
 
@@ -123,7 +122,7 @@ bytes ExecutionFramework::panicData(util::PanicCode _code)
 {
 	return
 		m_evmVersion.supportsReturndata() ?
-		toCompactBigEndian(selectorFromSignature32("Panic(uint256)"), 4) + encode(u256(static_cast<unsigned>(_code))) :
+		toCompactBigEndian(selectorFromSignatureU32("Panic(uint256)"), 4) + encode(u256(static_cast<unsigned>(_code))) :
 		bytes();
 }
 
@@ -166,7 +165,7 @@ void ExecutionFramework::sendMessage(bytes const& _data, bool _isCreation, u256 
 			cout << " value: " << _value << endl;
 		cout << " in:      " << util::toHex(_data) << endl;
 	}
-	evmc_message message = {};
+	evmc_message message{};
 	message.input_data = _data.data();
 	message.input_size = _data.size();
 	message.sender = EVMHost::convertToEVMC(m_sender);
@@ -175,29 +174,39 @@ void ExecutionFramework::sendMessage(bytes const& _data, bool _isCreation, u256 
 	if (_isCreation)
 	{
 		message.kind = EVMC_CREATE;
-		message.destination = EVMHost::convertToEVMC(h160{});
+		message.recipient = {};
+		message.code_address = {};
 	}
 	else
 	{
 		message.kind = EVMC_CALL;
-		message.destination = EVMHost::convertToEVMC(m_contractAddress);
+		message.recipient = EVMHost::convertToEVMC(m_contractAddress);
+		message.code_address = message.recipient;
 	}
+
 	message.gas = InitialGas.convert_to<int64_t>();
 
-	evmc::result result = m_evmcHost->call(message);
+	evmc::Result result = m_evmcHost->call(message);
 
 	m_output = bytes(result.output_data, result.output_data + result.output_size);
 	if (_isCreation)
 		m_contractAddress = EVMHost::convertFromEVMC(result.create_address);
 
-	m_gasUsed = InitialGas - result.gas_left;
+	unsigned const refundRatio = (m_evmVersion >= langutil::EVMVersion::london() ? 5 : 2);
+	auto const totalGasUsed = InitialGas - result.gas_left;
+	auto const gasRefund = min(u256(result.gas_refund), totalGasUsed / refundRatio);
+
+	m_gasUsed = totalGasUsed - gasRefund;
 	m_transactionSuccessful = (result.status_code == EVMC_SUCCESS);
 
 	if (m_showMessages)
 	{
-		cout << " out:     " << util::toHex(m_output) << endl;
-		cout << " result: " << static_cast<size_t>(result.status_code) << endl;
-		cout << " gas used: " << m_gasUsed.str() << endl;
+		cout << " out:                       " << util::toHex(m_output) << endl;
+		cout << " result:                    " << static_cast<size_t>(result.status_code) << endl;
+		cout << " gas used:                  " << m_gasUsed.str() << endl;
+		cout << " gas used (without refund): " << totalGasUsed.str() << endl;
+		cout << " gas refund (total):        " << result.gas_refund << endl;
+		cout << " gas refund (bound):        " << gasRefund.str() << endl;
 	}
 }
 
@@ -211,11 +220,12 @@ void ExecutionFramework::sendEther(h160 const& _addr, u256 const& _amount)
 		if (_amount > 0)
 			cout << " value: " << _amount << endl;
 	}
-	evmc_message message = {};
+	evmc_message message{};
 	message.sender = EVMHost::convertToEVMC(m_sender);
 	message.value = EVMHost::convertToEVMC(_amount);
 	message.kind = EVMC_CALL;
-	message.destination = EVMHost::convertToEVMC(_addr);
+	message.recipient = EVMHost::convertToEVMC(_addr);
+	message.code_address = message.recipient;
 	message.gas = InitialGas.convert_to<int64_t>();
 
 	m_evmcHost->call(message);
@@ -283,7 +293,7 @@ bool ExecutionFramework::storageEmpty(h160 const& _addr) const
 	if (it != m_evmcHost->accounts.end())
 	{
 		for (auto const& entry: it->second.storage)
-			if (!(entry.second.value == evmc::bytes32{}))
+			if (entry.second.current != evmc::bytes32{})
 				return false;
 	}
 	return true;

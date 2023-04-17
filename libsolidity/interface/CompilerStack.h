@@ -117,6 +117,13 @@ public:
 		None
 	};
 
+	enum class CompilationSourceType {
+		/// Regular compilation from Solidity source files.
+		Solidity,
+		/// Compilation from an imported Solidity AST.
+		SolidityAST
+	};
+
 	/// Creates a new compiler stack.
 	/// @param _readFile callback used to read files for import statements. Must return
 	/// and must not emit exceptions.
@@ -173,6 +180,10 @@ public:
 	/// When called without an argument it will revert to the default version.
 	/// Must be set before parsing.
 	void setEVMVersion(langutil::EVMVersion _version = langutil::EVMVersion{});
+
+	/// Set the EOF version used before running compile.
+	/// If set to std::nullopt (the default), legacy non-EOF bytecode is generated.
+	void setEOFVersion(std::optional<uint8_t> version);
 
 	/// Set model checker settings.
 	void setModelCheckerSettings(ModelCheckerSettings _settings);
@@ -345,9 +356,12 @@ public:
 	Json::Value gasEstimates(std::string const& _contractName) const;
 
 	/// Changes the format of the metadata appended at the end of the bytecode.
-	/// This is mostly a workaround to avoid bytecode and gas differences between compiler builds
-	/// caused by differences in metadata. Should only be used for testing.
 	void setMetadataFormat(MetadataFormat _metadataFormat) { m_metadataFormat = _metadataFormat; }
+
+	static MetadataFormat defaultMetadataFormat()
+	{
+		return VersionIsRelease ? MetadataFormat::WithReleaseVersionTag : MetadataFormat::WithPrereleaseVersionTag;
+	}
 
 private:
 	/// The state per source unit. Filled gradually during parsing.
@@ -400,6 +414,9 @@ private:
 
 	/// Store the contract definitions in m_contracts.
 	void storeContractDefinitions();
+
+	/// Annotate internal dispatch function Ids
+	void annotateInternalFunctionIDs();
 
 	/// @returns true if the source is requested to be compiled.
 	bool isRequestedSource(std::string const& _sourceName) const;
@@ -488,6 +505,7 @@ private:
 	State m_stopAfter = State::CompilationSuccessful;
 	bool m_viaIR = false;
 	langutil::EVMVersion m_evmVersion;
+	std::optional<uint8_t> m_eofVersion;
 	ModelCheckerSettings m_modelCheckerSettings;
 	std::map<std::string, std::set<std::string>> m_requestedContractNames;
 	bool m_generateEvmBytecode = true;
@@ -511,11 +529,11 @@ private:
 	langutil::DebugInfoSelection m_debugInfoSelection = langutil::DebugInfoSelection::Default();
 	bool m_parserErrorRecovery = false;
 	State m_stackState = Empty;
-	bool m_importedSources = false;
+	CompilationSourceType m_compilationSourceType = CompilationSourceType::Solidity;
 	/// Whether or not there has been an error during processing.
 	/// If this is true, the stack will refuse to generate code.
 	bool m_hasError = false;
-	MetadataFormat m_metadataFormat = VersionIsRelease ? MetadataFormat::WithReleaseVersionTag : MetadataFormat::WithPrereleaseVersionTag;
+	MetadataFormat m_metadataFormat = defaultMetadataFormat();
 };
 
 }

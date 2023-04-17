@@ -321,7 +321,7 @@ void StorageItem::storeValue(Type const& _sourceType, SourceLocation const& _loc
 					_sourceType.isImplicitlyConvertibleTo(*m_dataType),
 					"function item stored but target is not implicitly convertible to source"
 				);
-				solAssert(!fun->bound(), "");
+				solAssert(!fun->hasBoundFirstArgument(), "");
 				if (fun->kind() == FunctionType::Kind::External)
 				{
 					solAssert(fun->sizeOnStack() == 2, "");
@@ -557,7 +557,7 @@ TupleObject::TupleObject(
 	CompilerContext& _compilerContext,
 	std::vector<std::unique_ptr<LValue>>&& _lvalues
 ):
-	LValue(_compilerContext), m_lvalues(move(_lvalues))
+	LValue(_compilerContext), m_lvalues(std::move(_lvalues))
 {
 }
 

@@ -174,9 +174,26 @@ public:
 
 	enum class Category
 	{
-		Address, Integer, RationalNumber, StringLiteral, Bool, FixedPoint, Array, ArraySlice,
-		FixedBytes, Contract, Struct, Function, Enum, UserDefinedValueType, Tuple,
-		Mapping, TypeType, Modifier, Magic, Module,
+		Address,
+		Integer,
+		RationalNumber,
+		StringLiteral,
+		Bool,
+		FixedPoint,
+		Array,
+		ArraySlice,
+		FixedBytes,
+		Contract,
+		Struct,
+		Function,
+		Enum,
+		UserDefinedValueType,
+		Tuple,
+		Mapping,
+		TypeType,
+		Modifier,
+		Magic,
+		Module,
 		InaccessibleDynamic
 	};
 
@@ -184,6 +201,8 @@ public:
 	static Type const* commonType(Type const* _a, Type const* _b);
 
 	virtual Category category() const = 0;
+	static char const* categoryName(Type::Category _category);
+
 	/// @returns a valid solidity identifier such that two types should compare equal if and
 	/// only if they have the same identifier.
 	/// The identifier should start with "t_".
@@ -326,7 +345,7 @@ public:
 	/// given location.
 	virtual bool dataStoredIn(DataLocation) const { return false; }
 
-	/// Returns the list of all members of this type. Default implementation: no members apart from bound.
+	/// Returns the list of all members of this type. Default implementation: no members apart from attached functions.
 	/// @param _currentScope scope in which the members are accessed.
 	MemberList const& members(ASTNode const* _currentScope) const;
 	/// Convenience method, returns the type of the given named member or an empty pointer if no such member exists.
@@ -377,13 +396,28 @@ public:
 	/// Clears all internally cached values (if any).
 	virtual void clearCache() const;
 
+	/// Scans all "using for" directives in the @a _scope for functions implementing
+	/// the operator represented by @a _token. Returns the set of all definitions where the type
+	/// of the first argument matches this type object.
+	///
+	/// @note: If the AST has passed analysis without errors,
+	/// the function will find at most one definition for an operator.
+	///
+	/// @param _unary If true, only definitions that accept exactly one argument are included.
+	/// Otherwise only definitions that accept exactly two arguments.
+	std::set<FunctionDefinition const*, ASTCompareByID<ASTNode>> operatorDefinitions(
+		Token _token,
+		ASTNode const& _scope,
+		bool _unary
+	) const;
+
 private:
 	/// @returns a member list containing all members added to this type by `using for` directives.
-	static MemberList::MemberMap boundFunctions(Type const& _type, ASTNode const& _scope);
+	static MemberList::MemberMap attachedFunctions(Type const& _type, ASTNode const& _scope);
 
 protected:
 	/// @returns the members native to this type depending on the given context. This function
-	/// is used (in conjunction with boundFunctions to fill m_members below.
+	/// is used (in conjunction with attachedFunctions to fill m_members below.
 	virtual MemberList::MemberMap nativeMembers(ASTNode const* /*_currentScope*/) const
 	{
 		return MemberList::MemberMap();
@@ -802,14 +836,14 @@ public:
 	/// Constructor for a byte array ("bytes") and string.
 	explicit ArrayType(DataLocation _location, bool _isString = false);
 
-	/// Constructor for a dynamically sized array type ("type[]")
+	/// Constructor for a dynamically sized array type ("<type>[]")
 	ArrayType(DataLocation _location, Type const* _baseType):
 		ReferenceType(_location),
 		m_baseType(copyForLocationIfReference(_baseType))
 	{
 	}
 
-	/// Constructor for a fixed-size array type ("type[20]")
+	/// Constructor for a fixed-size array type ("<type>[<length>]")
 	ArrayType(DataLocation _location, Type const* _baseType, u256 _length):
 		ReferenceType(_location),
 		m_baseType(copyForLocationIfReference(_baseType)),
@@ -1272,7 +1306,7 @@ public:
 		bool saltSet = false;
 		/// true iff the function is called as arg1.fun(arg2, ..., argn).
 		/// This is achieved through the "using for" directive.
-		bool bound = false;
+		bool hasBoundFirstArgument = false;
 
 		static Options withArbitraryParameters()
 		{
@@ -1287,7 +1321,7 @@ public:
 			result.gasSet = _type.gasSet();
 			result.valueSet = _type.valueSet();
 			result.saltSet = _type.saltSet();
-			result.bound = _type.bound();
+			result.hasBoundFirstArgument = _type.hasBoundFirstArgument();
 			return result;
 		}
 	};
@@ -1322,7 +1356,7 @@ public:
 	)
 	{
 		// In this constructor, only the "arbitrary Parameters" option should be used.
-		solAssert(!bound() && !gasSet() && !valueSet() && !saltSet());
+		solAssert(!hasBoundFirstArgument() && !gasSet() && !valueSet() && !saltSet());
 	}
 
 	/// Detailed constructor, use with care.
@@ -1354,8 +1388,8 @@ public:
 			"Return parameter names list must match return parameter types list!"
 		);
 		solAssert(
-			!bound() || !m_parameterTypes.empty(),
-			"Attempted construction of bound function without self type"
+			!hasBoundFirstArgument() || !m_parameterTypes.empty(),
+			"Attempted construction of attached function without self type"
 		);
 	}
 
@@ -1372,7 +1406,7 @@ public:
 	/// storage pointers) are replaced by InaccessibleDynamicType instances.
 	TypePointers returnParameterTypesWithoutDynamicTypes() const;
 	std::vector<std::string> const& returnParameterNames() const { return m_returnParameterNames; }
-	/// @returns the "self" parameter type for a bound function
+	/// @returns the "self" parameter type for an attached function
 	Type const* selfType() const;
 
 	std::string richIdentifier() const override;
@@ -1406,8 +1440,8 @@ public:
 
 	/// @returns true if this function can take the given arguments (possibly
 	/// after implicit conversion).
-	/// @param _selfType if the function is bound, this has to be supplied and is the type of the
-	/// expression the function is called on.
+	/// @param _selfType if the function is attached as a member function, this has to be supplied
+	/// and is the type of the expression the function is called on.
 	bool canTakeArguments(
 		FuncCallArguments const& _arguments,
 		Type const* _selfType = nullptr
@@ -1471,20 +1505,20 @@ public:
 	bool gasSet() const { return m_options.gasSet; }
 	bool valueSet() const { return m_options.valueSet; }
 	bool saltSet() const { return m_options.saltSet; }
-	bool bound() const { return m_options.bound; }
+	bool hasBoundFirstArgument() const { return m_options.hasBoundFirstArgument; }
 
 	/// @returns a copy of this type, where gas or value are set manually. This will never set one
 	/// of the parameters to false.
 	Type const* copyAndSetCallOptions(bool _setGas, bool _setValue, bool _setSalt) const;
 
-	/// @returns a copy of this function type with the `bound` flag set to true.
+	/// @returns a copy of this function type with the `hasBoundFirstArgument` flag set to true.
 	/// Should only be called on library functions.
-	FunctionTypePointer asBoundFunction() const;
+	FunctionTypePointer withBoundFirstArgument() const;
 
 	/// @returns a copy of this function type where the location of reference types is changed
 	/// from CallData to Memory. This is the type that would be used when the function is
 	/// called externally, as opposed to the parameter types that are available inside the function body.
-	/// Also supports variants to be used for library or bound calls.
+	/// Also supports variants to be used for library or attached function calls.
 	/// @param _inLibrary if true, uses DelegateCall as location.
 	FunctionTypePointer asExternallyCallableFunction(bool _inLibrary) const;
 
@@ -1510,8 +1544,8 @@ private:
 class MappingType: public CompositeType
 {
 public:
-	MappingType(Type const* _keyType, Type const* _valueType):
-		m_keyType(_keyType), m_valueType(_valueType) {}
+	MappingType(Type const* _keyType, ASTString _keyName, Type const* _valueType, ASTString _valueName):
+		m_keyType(_keyType), m_keyName(_keyName), m_valueType(_valueType), m_valueName(_valueName) {}
 
 	Category category() const override { return Category::Mapping; }
 
@@ -1528,15 +1562,21 @@ public:
 	bool hasSimpleZeroValueInMemory() const override { solAssert(false, ""); }
 	bool nameable() const override { return true; }
 
+	std::vector<std::tuple<std::string, Type const*>> makeStackItems() const override;
+
 	Type const* keyType() const { return m_keyType; }
+	ASTString keyName() const { return m_keyName; }
 	Type const* valueType() const { return m_valueType; }
+	ASTString valueName() const { return m_valueName; }
 
 protected:
 	std::vector<Type const*> decomposition() const override { return {m_valueType}; }
 
 private:
 	Type const* m_keyType;
+	ASTString m_keyName;
 	Type const* m_valueType;
+	ASTString m_valueName;
 };
 
 /**

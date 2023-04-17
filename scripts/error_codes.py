@@ -202,7 +202,10 @@ def examine_id_coverage(top_dir, source_id_to_file_names, new_ids_only=False):
         "4591", # "There are more than 256 warnings. Ignoring the rest."
                 # Due to 3805, the warning lists look different for different compiler builds.
         "1834", # Unimplemented feature error, as we do not test it anymore via cmdLineTests
-        "5430"  # basefee being used in inline assembly for EVMVersion < london
+        "5430", # basefee being used in inline assembly for EVMVersion < london
+        "1180", # SMTChecker, covered by CL tests
+        "2961", # SMTChecker, covered by CL tests
+        "9576", # SMTChecker, covered by CL tests
     }
     assert len(test_ids & white_ids) == 0, "The sets are not supposed to intersect"
     test_ids |= white_ids
@@ -227,10 +230,10 @@ def examine_id_coverage(top_dir, source_id_to_file_names, new_ids_only=False):
             return False
 
     old_source_only_ids = {
-        "1584", "1823",
+        "1218", "1584", "1823",
         "1988", "2066", "2833", "3356",
-        "3893", "3996", "4010", "4802",
-        "5272", "5622", "7128", "7400",
+        "3893", "3996", "4010", "4458", "4802",
+        "4902", "5272", "5622", "5798", "5840", "7128", "7400",
         "7589", "7593", "7649", "7710",
         "8065", "8084", "8140", "8158",
         "8312", "8592", "9134", "9609",

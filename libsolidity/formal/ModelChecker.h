@@ -58,7 +58,7 @@ public:
 	);
 
 	// TODO This should be removed for 0.9.0.
-	void enableAllEnginesIfPragmaPresent(std::vector<std::shared_ptr<SourceUnit>> const& _sources);
+	static bool isPragmaPresent(std::vector<std::shared_ptr<SourceUnit>> const& _sources);
 
 	/// Generates error messages if the requested sources and contracts
 	/// do not exist.
@@ -74,6 +74,10 @@ public:
 	/// @returns SMT solvers that are available via the C++ API.
 	static smtutil::SMTSolverChoice availableSolvers();
 
+	/// @returns the intersection of the enabled and available solvers,
+	/// reporting warnings when a solver is enabled but not available.
+	static smtutil::SMTSolverChoice checkRequestedSolvers(smtutil::SMTSolverChoice _enabled, langutil::ErrorReporter& _errorReporter);
+
 private:
 	/// Error reporter from CompilerStack.
 	/// We need to append m_uniqueErrorReporter
@@ -84,6 +88,12 @@ private:
 	/// This is local to ModelChecker, so needs to be appended
 	/// to m_errorReporter at the end of the analysis.
 	langutil::UniqueErrorReporter m_uniqueErrorReporter;
+
+	/// Used by SMTEncoder, BMC and CHC to accumulate unsupported
+	/// warnings and avoid duplicates.
+	/// This is local to ModelChecker, so needs to be appended
+	/// to m_errorReporter at the end of the analysis.
+	langutil::UniqueErrorReporter m_unsupportedErrorReporter;
 
 	ModelCheckerSettings m_settings;
 

@@ -97,6 +97,7 @@ pair<string, string> IRGenerator::run(
 
 	yul::YulStack asmStack(
 		m_evmVersion,
+		m_eofVersion,
 		yul::YulStack::Language::StrictAssembly,
 		m_optimiserSettings,
 		m_context.debugInfoSelection()
@@ -113,7 +114,7 @@ pair<string, string> IRGenerator::run(
 	}
 	asmStack.optimize();
 
-	return {move(ir), asmStack.print(m_context.soliditySourceProvider())};
+	return {std::move(ir), asmStack.print(m_context.soliditySourceProvider())};
 }
 
 string IRGenerator::generate(
@@ -214,7 +215,7 @@ string IRGenerator::generate(
 	// NOTE: Function pointers can be passed from creation code via storage variables. We need to
 	// get all the functions they could point to into the dispatch functions even if they're never
 	// referenced by name in the deployed code.
-	m_context.initializeInternalDispatch(move(internalDispatchMap));
+	m_context.initializeInternalDispatch(std::move(internalDispatchMap));
 
 	// Do not register immutables to avoid assignment.
 	t("DeployedObject", IRNames::deployedObject(_contract));
@@ -236,8 +237,8 @@ string IRGenerator::generate(
 
 	solAssert(_contract.annotation().creationCallGraph->get() != nullptr, "");
 	solAssert(_contract.annotation().deployedCallGraph->get() != nullptr, "");
-	verifyCallGraph(collectReachableCallables(**_contract.annotation().creationCallGraph), move(creationFunctionList));
-	verifyCallGraph(collectReachableCallables(**_contract.annotation().deployedCallGraph), move(deployedFunctionList));
+	verifyCallGraph(collectReachableCallables(**_contract.annotation().creationCallGraph), std::move(creationFunctionList));
+	verifyCallGraph(collectReachableCallables(**_contract.annotation().deployedCallGraph), std::move(deployedFunctionList));
 
 	return t.render();
 }
@@ -312,12 +313,12 @@ InternalDispatchMap IRGenerator::generateInternalDispatchFunctions(ContractDefin
 				solAssert(m_context.functionCollector().contains(IRNames::function(*function)), "");
 
 				cases.emplace_back(map<string, string>{
-					{"funID", to_string(m_context.internalFunctionID(*function, true))},
+					{"funID", to_string(*function->annotation().internalFunctionID)},
 					{"name", IRNames::function(*function)}
 				});
 			}
 
-			templ("cases", move(cases));
+			templ("cases", std::move(cases));
 			return templ.render();
 		});
 	}
@@ -944,7 +945,7 @@ void IRGenerator::generateConstructors(ContractDefinition const& _contract)
 					generateFunctionWithModifierInner(*constructor);
 				}
 			}
-			t("userDefinedConstructorBody", move(body));
+			t("userDefinedConstructorBody", std::move(body));
 
 			return t.render();
 		});
@@ -1116,8 +1117,7 @@ void IRGenerator::resetContext(ContractDefinition const& _contract, ExecutionCon
 		m_context.debugInfoSelection(),
 		m_context.soliditySourceProvider()
 	);
-	newContext.copyFunctionIDsFrom(m_context);
-	m_context = move(newContext);
+	m_context = std::move(newContext);
 
 	m_context.setMostDerivedContract(_contract);
 	for (auto const& var: ContractType(_contract).stateVariables())

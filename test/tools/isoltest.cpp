@@ -159,6 +159,7 @@ TestTool::Result TestTool::process()
 			m_test = m_testCaseCreator(TestCase::Config{
 				m_path.string(),
 				m_options.evmVersion(),
+				m_options.eofVersion(),
 				m_options.vmPaths,
 				m_options.enforceCompileToEwasm,
 				m_options.enforceGasTest,
@@ -502,22 +503,22 @@ int main(int argc, char const *argv[])
 	catch (boost::program_options::error const& exception)
 	{
 		cerr << exception.what() << endl;
-		return EXIT_FAILURE;
+		return 2;
 	}
 	catch (std::runtime_error const& exception)
 	{
 		cerr << exception.what() << endl;
-		return EXIT_FAILURE;
+		return 2;
 	}
 	catch (solidity::test::ConfigException const& exception)
 	{
 		cerr << exception.what() << endl;
-		return EXIT_FAILURE;
+		return 2;
 	}
 	catch (...)
 	{
 		cerr << "Unhandled exception caught." << endl;
 		cerr << boost::current_exception_diagnostic_information() << endl;
-		return EXIT_FAILURE;
+		return 2;
 	}
 }

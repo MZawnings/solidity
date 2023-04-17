@@ -22,6 +22,7 @@
  */
 
 #include <libsolidity/ast/ASTJsonImporter.h>
+#include <libsolidity/ast/UserDefinableOperators.h>
 
 #include <libyul/AsmJsonImporter.h>
 #include <libyul/AST.h>
@@ -83,7 +84,7 @@ ASTPointer<T> ASTJsonImporter::createASTNode(Json::Value const& _node, Args&&...
 	auto n = make_shared<T>(
 		id,
 		createSourceLocation(_node),
-		forward<Args>(_args)...
+		std::forward<Args>(_args)...
 	);
 	return n;
 }
@@ -114,6 +115,20 @@ SourceLocation ASTJsonImporter::createNameSourceLocation(Json::Value const& _nod
 	astAssert(member(_node, "nameLocation").isString(), "'nameLocation' must be a string");
 
 	return solidity::langutil::parseSourceLocation(_node["nameLocation"].asString(), m_sourceNames);
+}
+
+SourceLocation ASTJsonImporter::createKeyNameSourceLocation(Json::Value const& _node)
+{
+	astAssert(member(_node, "keyNameLocation").isString(), "'keyNameLocation' must be a string");
+
+	return solidity::langutil::parseSourceLocation(_node["keyNameLocation"].asString(), m_sourceNames);
+}
+
+SourceLocation ASTJsonImporter::createValueNameSourceLocation(Json::Value const& _node)
+{
+	astAssert(member(_node, "valueNameLocation").isString(), "'valueNameLocation' must be a string");
+
+	return solidity::langutil::parseSourceLocation(_node["valueNameLocation"].asString(), m_sourceNames);
 }
 
 template<class T>
@@ -299,7 +314,7 @@ ASTPointer<ImportDirective> ASTJsonImporter::createImportDirective(Json::Value c
 		path,
 		unitAlias,
 		createNameSourceLocation(_node),
-		move(symbolAliases)
+		std::move(symbolAliases)
 	);
 
 	astAssert(_node["absolutePath"].isString(), "Expected 'absolutePath' to be a string!");
@@ -383,15 +398,42 @@ ASTPointer<InheritanceSpecifier> ASTJsonImporter::createInheritanceSpecifier(Jso
 ASTPointer<UsingForDirective> ASTJsonImporter::createUsingForDirective(Json::Value const& _node)
 {
 	vector<ASTPointer<IdentifierPath>> functions;
+	vector<optional<Token>> operators;
 	if (_node.isMember("libraryName"))
+	{
+		astAssert(!_node["libraryName"].isArray());
+		astAssert(!_node["libraryName"]["operator"]);
 		functions.emplace_back(createIdentifierPath(_node["libraryName"]));
+		operators.emplace_back(nullopt);
+	}
 	else if (_node.isMember("functionList"))
 		for (Json::Value const& function: _node["functionList"])
-			functions.emplace_back(createIdentifierPath(function["function"]));
+		{
+			if (function.isMember("function"))
+			{
+				astAssert(!function.isMember("operator"));
+				astAssert(!function.isMember("definition"));
+
+				functions.emplace_back(createIdentifierPath(function["function"]));
+				operators.emplace_back(nullopt);
+			}
+			else
+			{
+				astAssert(function.isMember("operator"));
+				astAssert(function.isMember("definition"));
+
+				Token const operatorName = scanSingleToken(function["operator"]);
+				astAssert(util::contains(frontend::userDefinableOperators, operatorName));
+
+				functions.emplace_back(createIdentifierPath(function["definition"]));
+				operators.emplace_back(operatorName);
+			}
+		}
 
 	return createASTNode<UsingForDirective>(
 		_node,
-		move(functions),
+		std::move(functions),
+		std::move(operators),
 		!_node.isMember("libraryName"),
 		_node["typeName"].isNull() ? nullptr  : convertJsonToASTNode<TypeName>(_node["typeName"]),
 		memberAsBool(_node, "global")
@@ -420,7 +462,8 @@ ASTPointer<EnumDefinition> ASTJsonImporter::createEnumDefinition(Json::Value con
 		_node,
 		memberAsASTString(_node, "name"),
 		createNameSourceLocation(_node),
-		members
+		members,
+		_node["documentation"].isNull() ? nullptr : createDocumentation(member(_node, "documentation"))
 	);
 }
 
@@ -648,7 +691,11 @@ ASTPointer<Mapping> ASTJsonImporter::createMapping(Json::Value const&  _node)
 	return createASTNode<Mapping>(
 		_node,
 		convertJsonToASTNode<TypeName>(member(_node, "keyType")),
-		convertJsonToASTNode<TypeName>(member(_node, "valueType"))
+		memberAsASTString(_node, "keyName"),
+		createKeyNameSourceLocation(_node),
+		convertJsonToASTNode<TypeName>(member(_node, "valueType")),
+		memberAsASTString(_node, "valueName"),
+		createValueNameSourceLocation(_node)
 	);
 }
 
@@ -686,7 +733,7 @@ ASTPointer<InlineAssembly> ASTJsonImporter::createInlineAssembly(Json::Value con
 		_node,
 		nullOrASTString(_node, "documentation"),
 		dialect,
-		move(flags),
+		std::move(flags),
 		operations
 	);
 }

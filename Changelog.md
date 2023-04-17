@@ -1,18 +1,133 @@
-### 0.8.16 (unreleased)
+## 0.8.20 (unreleased)
 
 Language Features:
 
 
 Compiler Features:
+ * Assembler: Use ``push0`` for placing ``0`` in the stack for EVM versions starting from "Shanghai". This decreases the deployment costs.
+ * EVM: Support for the EVM Version "Shanghai".
+ * NatSpec: Add support for NatSpec documentation in ``enum`` definitions.
+ * Optimizer: Re-implement simplified version of UnusedAssignEliminator and UnusedStoreEliminator. It can correctly remove some unused assignments in deeply nested loops that were ignored by the old version.
+ * SMTChecker: Properties that are proved safe are now reported explicitly at the end of the analysis. By default, only the number of safe properties is shown. The CLI option ``--model-checker-show-proved-safe`` and the JSON option ``settings.modelChecker.showProvedSafe`` can be enabled to show the full list of safe properties.
+ * SMTChecker: Group all messages about unsupported language features in a single warning. The CLI option ``--model-checker-show-unsupported`` and the JSON option ``settings.modelChecker.showUnsupported`` can be enabled to show the full list.
+ * Yul EVM Code Transform: If available, use ``push0`` instead of ``codesize`` to produce an arbitrary value on stack in order to create equal stack heights between branches.
+
+
+Bugfixes:
+ * Antlr Grammar: Fix discrepancy with the parser, which allowed octal numbers.
+ * Antlr Grammar: Fix of a discrepancy with the parser, which allowed numbers followed by an identifier with no whitespace.
+ * Antlr Grammar: Stricter rules for function definitions. The grammar will no longer accept as valid free functions having specifiers which are exclusive to contract functions.
+
+
+AST Changes:
+ * AST: add the ``internalFunctionID`` field to the AST nodes of functions that may be called via the internal dispatch. These IDs are always generated, but they are only used in via-IR code generation.
+
+
+### 0.8.19 (2023-02-22)
+
+Language Features:
+* Allow defining custom operators for user-defined value types via ``using {f as +} for T global`` syntax.
+
+
+Compiler Features:
+ * SMTChecker: New trusted mode that assumes that any compile-time available code is the actual used code even in external calls. This can be used via the CLI option ``--model-checker-ext-calls trusted`` or the JSON field ``settings.modelChecker.extCalls: "trusted"``.
+
+
+Bugfixes:
+ * Assembler: Avoid duplicating subassembly bytecode where possible.
+ * Code Generator: Avoid including references to the deployed label of referenced functions if they are called right away.
+ * ContractLevelChecker: Properly distinguish the case of missing base constructor arguments from having an unimplemented base function.
+ * SMTChecker: Fix internal error caused by unhandled ``z3`` expressions that come from the solver when bitwise operators are used.
+ * SMTChecker: Fix internal error when using the custom NatSpec annotation to abstract free functions.
+ * TypeChecker: Also allow external library functions in ``using for``.
+
+
+AST Changes:
+ * AST: Add ``function`` field to ``UnaryOperation`` and ``BinaryOperation`` AST nodes. ``functionList`` in ``UsingForDirective`` AST nodes will now contain ``operator`` and ``definition`` members instead of ``function`` when the list entry defines an operator.
+
+
+### 0.8.18 (2023-02-01)
+
+Language Features:
+ * Allow named parameters in mapping types.
+
+
+Compiler Features:
+ * Commandline Interface: Add ``--no-cbor-metadata`` that skips CBOR metadata from getting appended at the end of the bytecode.
+ * Commandline Interface: Return exit code ``2`` on uncaught exceptions.
+ * EVM: Deprecate ``block.difficulty`` and disallow ``difficulty()`` in inline assembly for EVM versions >= paris. The change is due to the renaming introduced by [EIP-4399](https://eips.ethereum.org/EIPS/eip-4399).
+ * EVM: Introduce ``block.prevrandao`` in Solidity and ``prevrandao()`` in inline assembly for EVM versions >= paris.
+ * EVM: Set the default EVM version to "Paris".
+ * EVM: Support for the EVM version "Paris".
+ * Language Server: Add basic document hover support.
+ * Natspec: Add event Natspec inheritance for devdoc.
+ * Optimizer: Added optimization rule ``and(shl(X, Y), shl(X, Z)) => shl(X, and(Y, Z))``.
+ * Parser: More detailed error messages about invalid version pragmas.
+ * SMTChecker: Make ``z3`` the default solver for the BMC and CHC engines instead of all solvers.
+ * SMTChecker: Support Eldarica as a Horn solver for the CHC engine when using the CLI option ``--model-checker-solvers eld``. The binary ``eld`` must be available in the system.
+ * Solidity Upgrade Tool: Remove ``solidity-upgrade`` tool.
+ * Standard JSON: Add a boolean field ``settings.metadata.appendCBOR`` that skips CBOR metadata from getting appended at the end of the bytecode.
+ * TypeChecker: Warn when using deprecated builtin ``selfdestruct``.
+ * Yul EVM Code Transform: Generate more optimal code for user-defined functions that always terminate a transaction. No return labels will be pushed for calls to functions that always terminate.
+ * Yul Optimizer: Allow replacing the previously hard-coded cleanup sequence by specifying custom steps after a colon delimiter (``:``) in the sequence string.
+ * Yul Optimizer: Eliminate ``keccak256`` calls if the value was already calculated by a previous call and can be reused.
+
+
+Bugfixes:
+ * Parser: Disallow several ``indexed`` attributes for the same event parameter.
+ * Parser: Disallow usage of the ``indexed`` attribute for modifier parameters.
+ * SMTChecker: Fix display error for negative integers that are one more than powers of two.
+ * SMTChecker: Fix internal error on chain assignments using static fully specified state variables.
+ * SMTChecker: Fix internal error on multiple wrong SMTChecker natspec entries.
+ * SMTChecker: Fix internal error when a public library function is called internally.
+ * SMTChecker: Fix internal error when deleting struct member of function type.
+ * SMTChecker: Fix internal error when using user-defined types as mapping indices or struct members.
+ * SMTChecker: Improved readability for large integers that are powers of two or almost powers of two in error messages.
+ * TypeChecker: Fix bug where private library functions could be attached with ``using for`` outside of their declaration scope.
+ * Yul Optimizer: Hash hex and decimal literals according to their value instead of their representation, improving the detection of equivalent functions.
+
+
+### 0.8.17 (2022-09-08)
+
+Important Bugfixes:
+ * Yul Optimizer: Prevent the incorrect removal of storage writes before calls to Yul functions that conditionally terminate the external EVM call.
+
+
+Compiler Features:
+ * Code Generator: More efficient overflow checks for multiplication.
+ * Language Server: Analyze all files in a project by default (can be customized by setting ``'file-load-strategy'`` to ``'directly-opened-and-on-import'`` in LSP settings object).
+ * Yul Optimizer: Simplify the starting offset of zero-length operations to zero.
+
+
+Bugfixes:
+ * Type Checker: Fix internal compiler error on tuple assignments with invalid left-hand side.
+ * Yul IR Code Generation: Fix internal compiler error when accessing the ``.slot`` member of a mapping through a storage reference in inline assembly.
+
+
+Build System:
+ * Allow disabling pedantic warnings and do not treat warnings as errors during compiler build when ``-DPEDANTIC=OFF`` flag is passed to CMake.
+ * Update emscripten to version 3.1.19.
+
+
+### 0.8.16 (2022-08-08)
+
+Important Bugfixes:
+ * Code Generation: Fix data corruption that affected ABI-encoding of calldata values represented by tuples: structs at any nesting level; argument lists of external functions, events and errors; return value lists of external functions. The 32 leading bytes of the first dynamically-encoded value in the tuple would get zeroed when the last component contained a statically-encoded array.
+
+
+Compiler Features:
+ * Code Generator: More efficient code for checked addition and subtraction.
  * TypeChecker: Support using library constants in initializers of other constants.
  * Yul IR Code Generation: Improved copy routines for arrays with packed storage layout.
- * Yul Optimizer: Add rule to convert `mod(mul(X, Y), A)` into `mulmod(X, Y, A)`, if `A` is a power of two.
- * Yul Optimizer: Add rule to convert `mod(add(X, Y), A)` into `addmod(X, Y, A)`, if `A` is a power of two.
- * Code Generator: More efficient code for checked addition and subtraction.
+ * Yul Optimizer: Add rule to convert ``mod(add(X, Y), A)`` into ``addmod(X, Y, A)``, if ``A`` is a power of two.
+ * Yul Optimizer: Add rule to convert ``mod(mul(X, Y), A)`` into ``mulmod(X, Y, A)``, if ``A`` is a power of two.
+
 
 Bugfixes:
  * Commandline Interface: Disallow the following options outside of the compiler mode: ``--via-ir``,``--metadata-literal``, ``--metadata-hash``, ``--model-checker-show-unproved``, ``--model-checker-div-mod-no-slacks``, ``--model-checker-engine``, ``--model-checker-invariants``, ``--model-checker-solvers``, ``--model-checker-timeout``, ``--model-checker-contracts``, ``--model-checker-targets``.
- * Type Checker: Fix null dereference in `abi.encodeCall` type checking of free function.
+ * Type Checker: Fix compiler crash on tuple assignments involving certain patterns with unary tuples on the left-hand side.
+ * Type Checker: Fix compiler crash when ``abi.encodeCall`` received a tuple expression instead of an inline tuple.
+ * Type Checker: Fix null dereference in ``abi.encodeCall`` type checking of free function.
 
 
 ### 0.8.15 (2022-06-15)

@@ -63,6 +63,7 @@ set(sources
 	ast/CallGraph.cpp
 	ast/CallGraph.h
 	ast/ExperimentalFeatures.h
+	ast/UserDefinableOperators.h
 	ast/Types.cpp
 	ast/Types.h
 	ast/TypeProvider.cpp
@@ -149,12 +150,17 @@ set(sources
 	interface/Natspec.h
 	interface/OptimiserSettings.h
 	interface/ReadFile.h
+	interface/SMTSolverCommand.cpp
+	interface/SMTSolverCommand.h
 	interface/StandardCompiler.cpp
 	interface/StandardCompiler.h
 	interface/StorageLayout.cpp
 	interface/StorageLayout.h
+	interface/UniversalCallback.h
 	interface/Version.cpp
 	interface/Version.h
+	lsp/DocumentHoverHandler.cpp
+	lsp/DocumentHoverHandler.h
 	lsp/FileRepository.cpp
 	lsp/FileRepository.h
 	lsp/GotoDefinition.cpp
@@ -179,5 +185,5 @@ set(sources
 )
 
 add_library(solidity ${sources})
-target_link_libraries(solidity PUBLIC yul evmasm langutil smtutil solutil Boost::boost fmt::fmt-header-only)
+target_link_libraries(solidity PUBLIC yul evmasm langutil smtutil solutil Boost::boost fmt::fmt-header-only Threads::Threads)
 

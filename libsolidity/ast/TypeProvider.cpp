@@ -404,7 +404,7 @@ TupleType const* TypeProvider::tuple(vector<Type const*> members)
 	if (members.empty())
 		return &m_emptyTuple;
 
-	return createAndGet<TupleType>(move(members));
+	return createAndGet<TupleType>(std::move(members));
 }
 
 ReferenceType const* TypeProvider::withLocation(ReferenceType const* _type, DataLocation _location, bool _isPointer)
@@ -450,7 +450,7 @@ FunctionType const* TypeProvider::function(
 )
 {
 	// Can only use this constructor for "arbitraryParameters".
-	solAssert(!_options.valueSet && !_options.gasSet && !_options.saltSet && !_options.bound);
+	solAssert(!_options.valueSet && !_options.gasSet && !_options.saltSet && !_options.hasBoundFirstArgument);
 	return createAndGet<FunctionType>(
 		_parameterTypes,
 		_returnParameterTypes,
@@ -571,9 +571,9 @@ MagicType const* TypeProvider::meta(Type const* _type)
 	return createAndGet<MagicType>(_type);
 }
 
-MappingType const* TypeProvider::mapping(Type const* _keyType, Type const* _valueType)
+MappingType const* TypeProvider::mapping(Type const* _keyType, ASTString _keyName, Type const* _valueType, ASTString _valueName)
 {
-	return createAndGet<MappingType>(_keyType, _valueType);
+	return createAndGet<MappingType>(_keyType, _keyName, _valueType, _valueName);
 }
 
 UserDefinedValueType const* TypeProvider::userDefinedValueType(UserDefinedValueTypeDefinition const& _definition)

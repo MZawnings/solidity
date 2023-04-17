@@ -485,6 +485,64 @@ BOOST_AUTO_TEST_CASE(event)
 	checkNatspec(sourceCode, "ERC20", userDoc, true);
 }
 
+BOOST_AUTO_TEST_CASE(event_inheritance)
+{
+	char const* sourceCode = R"(
+		contract ERC20 {
+			/// @notice This event is emitted when a transfer occurs.
+			/// @param from The source account.
+			/// @param to The destination account.
+			/// @param amount The amount.
+			/// @dev A test case!
+			event Transfer(address indexed from, address indexed to, uint amount);
+		}
+
+		contract A is ERC20 {
+		}
+
+		contract B is A {
+		}
+	)";
+
+	char const* devDoc = R"ABCDEF(
+	{
+		"events":
+		{
+			"Transfer(address,address,uint256)":
+			{
+				"details": "A test case!",
+				"params":
+				{
+					"amount": "The amount.",
+					"from": "The source account.",
+					"to": "The destination account."
+				}
+			}
+		},
+		"methods": {}
+	}
+	)ABCDEF";
+	checkNatspec(sourceCode, "ERC20", devDoc, false);
+	checkNatspec(sourceCode, "A", devDoc, false);
+	checkNatspec(sourceCode, "B", devDoc, false);
+
+	char const* userDoc = R"ABCDEF(
+	{
+		"events":
+		{
+			"Transfer(address,address,uint256)":
+			{
+				"notice": "This event is emitted when a transfer occurs."
+			}
+		},
+		"methods": {}
+	}
+	)ABCDEF";
+	checkNatspec(sourceCode, "ERC20", userDoc, true);
+	checkNatspec(sourceCode, "A", userDoc, true);
+	checkNatspec(sourceCode, "B", userDoc, true);
+}
+
 BOOST_AUTO_TEST_CASE(dev_desc_after_nl)
 {
 	char const* sourceCode = R"(
@@ -1016,6 +1074,40 @@ BOOST_AUTO_TEST_CASE(dev_author_at_function)
 	)";
 
 	expectNatspecError(sourceCode);
+}
+
+BOOST_AUTO_TEST_CASE(enum_no_docs)
+{
+	char const* sourceCode = R"(
+		contract C {
+			/// @title example of title
+			/// @author example of author
+			/// @notice example of notice
+			/// @dev example of dev
+			enum Color {
+				Red,
+				Green
+			}
+		}
+	)";
+
+	char const* devDoc = R"ABCDEF(
+	{
+		"kind": "dev",
+		"methods": {},
+		"version": 1
+	})ABCDEF";
+
+	checkNatspec(sourceCode, "C", devDoc, false);
+
+	char const* userDoc = R"ABCDEF(
+	{
+	  "kind": "user",
+	  "methods": {},
+	  "version": 1
+	})ABCDEF";
+
+	checkNatspec(sourceCode, "C", userDoc, true);
 }
 
 BOOST_AUTO_TEST_CASE(natspec_notice_without_tag)

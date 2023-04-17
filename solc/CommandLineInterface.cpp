@@ -48,7 +48,6 @@
 #include <libevmasm/GasMeter.h>
 
 #include <liblangutil/Exceptions.h>
-#include <liblangutil/Scanner.h>
 #include <liblangutil/SourceReferenceFormatter.h>
 
 #include <libsmtutil/Exceptions.h>
@@ -66,7 +65,6 @@
 
 #include <boost/filesystem.hpp>
 #include <boost/filesystem/operations.hpp>
-#include <boost/range/adaptor/filtered.hpp>
 #include <boost/algorithm/string.hpp>
 
 #ifdef _WIN32 // windows
@@ -88,6 +86,16 @@ using namespace std;
 using namespace solidity;
 using namespace solidity::util;
 using namespace solidity::langutil;
+
+namespace
+{
+
+set<frontend::InputMode> const CompilerInputModes{
+	frontend::InputMode::Compiler,
+	frontend::InputMode::CompilerWithASTImport
+};
+
+} // anonymous namespace
 
 namespace solidity::frontend
 {
@@ -161,7 +169,7 @@ static bool coloredOutput(CommandLineOptions const& _options)
 
 void CommandLineInterface::handleBinary(string const& _contract)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (m_options.compiler.outputs.binary)
 	{
@@ -187,21 +195,21 @@ void CommandLineInterface::handleBinary(string const& _contract)
 
 void CommandLineInterface::handleOpcode(string const& _contract)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.output.dir.empty())
-		createFile(m_compiler->filesystemFriendlyName(_contract) + ".opcode", evmasm::disassemble(m_compiler->object(_contract).bytecode));
+		createFile(m_compiler->filesystemFriendlyName(_contract) + ".opcode", evmasm::disassemble(m_compiler->object(_contract).bytecode, m_options.output.evmVersion));
 	else
 	{
 		sout() << "Opcodes:" << endl;
-		sout() << std::uppercase << evmasm::disassemble(m_compiler->object(_contract).bytecode);
+		sout() << std::uppercase << evmasm::disassemble(m_compiler->object(_contract).bytecode, m_options.output.evmVersion);
 		sout() << endl;
 	}
 }
 
 void CommandLineInterface::handleIR(string const& _contractName)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.compiler.outputs.ir)
 		return;
@@ -217,7 +225,7 @@ void CommandLineInterface::handleIR(string const& _contractName)
 
 void CommandLineInterface::handleIROptimized(string const& _contractName)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.compiler.outputs.irOptimized)
 		return;
@@ -233,7 +241,7 @@ void CommandLineInterface::handleIROptimized(string const& _contractName)
 
 void CommandLineInterface::handleEwasm(string const& _contractName)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.compiler.outputs.ewasm)
 		return;
@@ -256,7 +264,7 @@ void CommandLineInterface::handleEwasm(string const& _contractName)
 
 void CommandLineInterface::handleBytecode(string const& _contract)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (m_options.compiler.outputs.opcodes)
 		handleOpcode(_contract);
@@ -266,7 +274,7 @@ void CommandLineInterface::handleBytecode(string const& _contract)
 
 void CommandLineInterface::handleSignatureHashes(string const& _contract)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.compiler.outputs.signatureHashes)
 		return;
@@ -298,7 +306,7 @@ void CommandLineInterface::handleSignatureHashes(string const& _contract)
 
 void CommandLineInterface::handleMetadata(string const& _contract)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.compiler.outputs.metadata)
 		return;
@@ -312,7 +320,7 @@ void CommandLineInterface::handleMetadata(string const& _contract)
 
 void CommandLineInterface::handleABI(string const& _contract)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.compiler.outputs.abi)
 		return;
@@ -326,7 +334,7 @@ void CommandLineInterface::handleABI(string const& _contract)
 
 void CommandLineInterface::handleStorageLayout(string const& _contract)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.compiler.outputs.storageLayout)
 		return;
@@ -340,7 +348,7 @@ void CommandLineInterface::handleStorageLayout(string const& _contract)
 
 void CommandLineInterface::handleNatspec(bool _natspecDev, string const& _contract)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	bool enabled = false;
 	std::string suffix;
@@ -383,7 +391,7 @@ void CommandLineInterface::handleNatspec(bool _natspecDev, string const& _contra
 
 void CommandLineInterface::handleGasEstimation(string const& _contract)
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	Json::Value estimates = m_compiler->gasEstimates(_contract);
 	sout() << "Gas estimation:" << endl;
@@ -425,13 +433,15 @@ void CommandLineInterface::handleGasEstimation(string const& _contract)
 
 void CommandLineInterface::readInputFiles()
 {
-	solAssert(!m_standardJsonInput.has_value(), "");
+	solAssert(!m_standardJsonInput.has_value());
 
-	if (
-		m_options.input.mode == InputMode::Help ||
-		m_options.input.mode == InputMode::License ||
-		m_options.input.mode == InputMode::Version
-	)
+	static set<frontend::InputMode> const noInputFiles{
+		frontend::InputMode::Help,
+		frontend::InputMode::License,
+		frontend::InputMode::Version
+	};
+
+	if (noInputFiles.count(m_options.input.mode) == 1)
 		return;
 
 	m_fileReader.setBasePath(m_options.input.basePath);
@@ -497,12 +507,12 @@ void CommandLineInterface::readInputFiles()
 		string fileContent = readFileAsString(infile);
 		if (m_options.input.mode == InputMode::StandardJson)
 		{
-			solAssert(!m_standardJsonInput.has_value(), "");
-			m_standardJsonInput = move(fileContent);
+			solAssert(!m_standardJsonInput.has_value());
+			m_standardJsonInput = std::move(fileContent);
 		}
 		else
 		{
-			m_fileReader.addOrUpdateFile(infile, move(fileContent));
+			m_fileReader.addOrUpdateFile(infile, std::move(fileContent));
 			m_fileReader.allowDirectory(boost::filesystem::canonical(infile).remove_filename());
 		}
 	}
@@ -511,7 +521,7 @@ void CommandLineInterface::readInputFiles()
 	{
 		if (m_options.input.mode == InputMode::StandardJson)
 		{
-			solAssert(!m_standardJsonInput.has_value(), "");
+			solAssert(!m_standardJsonInput.has_value());
 			m_standardJsonInput = readUntilEnd(m_sin);
 		}
 		else
@@ -528,7 +538,7 @@ void CommandLineInterface::readInputFiles()
 
 map<string, Json::Value> CommandLineInterface::parseAstFromInput()
 {
-	solAssert(m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(m_options.input.mode == InputMode::CompilerWithASTImport);
 
 	map<string, Json::Value> sourceJsons;
 	map<string, string> tmpSources;
@@ -546,7 +556,7 @@ map<string, Json::Value> CommandLineInterface::parseAstFromInput()
 			astAssert(ast["sources"][src].isMember(astKey), "astkey is not member");
 			astAssert(ast["sources"][src][astKey]["nodeType"].asString() == "SourceUnit",  "Top-level node should be a 'SourceUnit'");
 			astAssert(sourceJsons.count(src) == 0, "All sources must have unique names");
-			sourceJsons.emplace(src, move(ast["sources"][src][astKey]));
+			sourceJsons.emplace(src, std::move(ast["sources"][src][astKey]));
 			tmpSources[src] = util::jsonCompactPrint(ast);
 		}
 	}
@@ -560,7 +570,7 @@ void CommandLineInterface::createFile(string const& _fileName, string const& _da
 {
 	namespace fs = boost::filesystem;
 
-	solAssert(!m_options.output.dir.empty(), "");
+	solAssert(!m_options.output.dir.empty());
 
 	// NOTE: create_directories() raises an exception if the path consists solely of '.' or '..'
 	// (or equivalent such as './././.'). Paths like 'a/b/.' and 'a/b/..' are fine though.
@@ -579,7 +589,7 @@ void CommandLineInterface::createFile(string const& _fileName, string const& _da
 
 void CommandLineInterface::createJson(string const& _fileName, string const& _json)
 {
-	createFile(boost::filesystem::basename(_fileName) + string(".json"), _json);
+	createFile(boost::filesystem::path(_fileName).stem().string() + string(".json"), _json);
 }
 
 bool CommandLineInterface::run(int _argc, char const* const* _argv)
@@ -640,10 +650,10 @@ void CommandLineInterface::processInput()
 		break;
 	case InputMode::StandardJson:
 	{
-		solAssert(m_standardJsonInput.has_value(), "");
+		solAssert(m_standardJsonInput.has_value());
 
-		StandardCompiler compiler(m_fileReader.reader(), m_options.formatting.json);
-		sout() << compiler.compile(move(m_standardJsonInput.value())) << endl;
+		StandardCompiler compiler(m_universalCallback.callback(), m_options.formatting.json);
+		sout() << compiler.compile(std::move(m_standardJsonInput.value())) << endl;
 		m_standardJsonInput.reset();
 		break;
 	}
@@ -679,9 +689,9 @@ void CommandLineInterface::printLicense()
 
 void CommandLineInterface::compile()
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
-	m_compiler = make_unique<CompilerStack>(m_fileReader.reader());
+	m_compiler = make_unique<CompilerStack>(m_universalCallback.callback());
 
 	SourceReferenceFormatter formatter(serr(false), *m_compiler, coloredOutput(m_options), m_options.formatting.withErrorIds);
 
@@ -689,6 +699,7 @@ void CommandLineInterface::compile()
 	{
 		if (m_options.metadata.literalSources)
 			m_compiler->useMetadataLiteralSources(true);
+		m_compiler->setMetadataFormat(m_options.metadata.format);
 		m_compiler->setMetadataHash(m_options.metadata.hash);
 		if (m_options.modelChecker.initialize)
 			m_compiler->setModelCheckerSettings(m_options.modelChecker.settings);
@@ -696,6 +707,7 @@ void CommandLineInterface::compile()
 		m_compiler->setLibraries(m_options.linker.libraries);
 		m_compiler->setViaIR(m_options.output.viaIR);
 		m_compiler->setEVMVersion(m_options.output.evmVersion);
+		m_compiler->setEOFVersion(m_options.output.eofVersion);
 		m_compiler->setRevertStringBehaviour(m_options.output.revertStrings);
 		if (m_options.output.debugInfoSelection.has_value())
 			m_compiler->selectDebugInfo(m_options.output.debugInfoSelection.value());
@@ -765,7 +777,10 @@ void CommandLineInterface::compile()
 	catch (CompilerError const& _exception)
 	{
 		m_hasOutput = true;
-		formatter.printExceptionInformation(_exception, "Compiler error");
+		formatter.printExceptionInformation(
+			_exception,
+			Error::errorSeverity(Error::Type::CompilerError)
+		);
 		solThrow(CommandLineExecutionError, "");
 	}
 	catch (Error const& _error)
@@ -778,7 +793,7 @@ void CommandLineInterface::compile()
 		else
 		{
 			m_hasOutput = true;
-			formatter.printExceptionInformation(_error, _error.typeName());
+			formatter.printExceptionInformation(_error, Error::errorSeverity(_error.type()));
 			solThrow(CommandLineExecutionError, "");
 		}
 	}
@@ -786,7 +801,7 @@ void CommandLineInterface::compile()
 
 void CommandLineInterface::handleCombinedJSON()
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.compiler.combinedJsonRequests.has_value())
 		return;
@@ -810,7 +825,7 @@ void CommandLineInterface::handleCombinedJSON()
 		if (m_options.compiler.combinedJsonRequests->binaryRuntime && m_compiler->compilationSuccessful())
 			contractData[g_strBinaryRuntime] = m_compiler->runtimeObject(contractName).toHex();
 		if (m_options.compiler.combinedJsonRequests->opcodes && m_compiler->compilationSuccessful())
-			contractData[g_strOpcodes] = evmasm::disassemble(m_compiler->object(contractName).bytecode);
+			contractData[g_strOpcodes] = evmasm::disassemble(m_compiler->object(contractName).bytecode, m_options.output.evmVersion);
 		if (m_options.compiler.combinedJsonRequests->asm_ && m_compiler->compilationSuccessful())
 			contractData[g_strAsm] = m_compiler->assemblyJSON(contractName);
 		if (m_options.compiler.combinedJsonRequests->storageLayout && m_compiler->compilationSuccessful())
@@ -878,7 +893,7 @@ void CommandLineInterface::handleCombinedJSON()
 
 void CommandLineInterface::handleAst()
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	if (!m_options.compiler.outputs.astCompactJson)
 		return;
@@ -919,7 +934,7 @@ void CommandLineInterface::serveLSP()
 
 void CommandLineInterface::link()
 {
-	solAssert(m_options.input.mode == InputMode::Linker, "");
+	solAssert(m_options.input.mode == InputMode::Linker);
 
 	// Map from how the libraries will be named inside the bytecode to their addresses.
 	map<string, h160> librariesReplacements;
@@ -977,12 +992,12 @@ void CommandLineInterface::link()
 		while (!src.second.empty() && *prev(src.second.end()) == '\n')
 			src.second.resize(src.second.size() - 1);
 	}
-	m_fileReader.setSourceUnits(move(sourceCodes));
+	m_fileReader.setSourceUnits(std::move(sourceCodes));
 }
 
 void CommandLineInterface::writeLinkedFiles()
 {
-	solAssert(m_options.input.mode == InputMode::Linker, "");
+	solAssert(m_options.input.mode == InputMode::Linker);
 
 	for (auto const& src: m_fileReader.sourceUnits())
 		if (src.first == g_stdinFileName)
@@ -1016,17 +1031,18 @@ string CommandLineInterface::objectWithLinkRefsHex(evmasm::LinkerObject const& _
 
 void CommandLineInterface::assemble(yul::YulStack::Language _language, yul::YulStack::Machine _targetMachine)
 {
-	solAssert(m_options.input.mode == InputMode::Assembler, "");
+	solAssert(m_options.input.mode == InputMode::Assembler);
 
 	bool successful = true;
 	map<string, yul::YulStack> yulStacks;
 	for (auto const& src: m_fileReader.sourceUnits())
 	{
 		// --no-optimize-yul option is not accepted in assembly mode.
-		solAssert(!m_options.optimizer.noOptimizeYul, "");
+		solAssert(!m_options.optimizer.noOptimizeYul);
 
 		auto& stack = yulStacks[src.first] = yul::YulStack(
 			m_options.output.evmVersion,
+			m_options.output.eofVersion,
 			_language,
 			m_options.optimiserSettings(),
 			m_options.output.debugInfoSelection.has_value() ?
@@ -1120,7 +1136,7 @@ void CommandLineInterface::assemble(yul::YulStack::Language _language, yul::YulS
 
 void CommandLineInterface::outputCompilationResults()
 {
-	solAssert(m_options.input.mode == InputMode::Compiler || m_options.input.mode == InputMode::CompilerWithASTImport, "");
+	solAssert(CompilerInputModes.count(m_options.input.mode) == 1);
 
 	handleCombinedJSON();
 
@@ -1176,8 +1192,10 @@ void CommandLineInterface::outputCompilationResults()
 	{
 		if (!m_options.output.dir.empty())
 			sout() << "Compiler run successful. Artifact(s) can be found in directory " << m_options.output.dir << "." << endl;
+		else if (contracts.empty())
+			sout() << "Compiler run successful. No contracts to compile." << endl;
 		else
-			serr() << "Compiler run successful, no output requested." << endl;
+			sout() << "Compiler run successful. No output generated." << endl;
 	}
 }
 

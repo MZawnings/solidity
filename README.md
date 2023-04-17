@@ -27,11 +27,11 @@ For a good overview and starting point, please check out the official [Solidity 
 
 Solidity is a statically-typed curly-braces programming language designed for developing smart contracts
 that run on the Ethereum Virtual Machine. Smart contracts are programs that are executed inside a peer-to-peer
-network where nobody has special authority over the execution, and thus they allow to implement tokens of value,
+network where nobody has special authority over the execution, and thus they allow anyone to implement tokens of value,
 ownership, voting, and other kinds of logic.
 
 When deploying contracts, you should use the latest released version of
-Solidity. This is because breaking changes, as well as new features and bug fixes are
+Solidity. This is because breaking changes, as well as new features and bug fixes, are
 introduced regularly. We currently use a 0.x version
 number [to indicate this fast pace of change](https://semver.org/#spec-item-4).
 
@@ -66,7 +66,7 @@ browser-based IDE. Here are some example contracts:
 
 ## Documentation
 
-The Solidity documentation is hosted at [Read the docs](https://docs.soliditylang.org).
+The Solidity documentation is hosted using [Read the Docs](https://docs.soliditylang.org).
 
 ## Development
 
@@ -79,8 +79,8 @@ You can find our current feature and bug priorities for forthcoming
 releases in the [projects section](https://github.com/ethereum/solidity/projects).
 
 ## Maintainers
-* [@axic](https://github.com/axic)
-* [@chriseth](https://github.com/chriseth)
+The Solidity programming language and compiler are open-source community projects governed by a core team.
+The core team is sponsored by the [Ethereum Foundation](https://ethereum.foundation/).
 
 ## License
 Solidity is licensed under [GNU General Public License v3.0](LICENSE.txt).

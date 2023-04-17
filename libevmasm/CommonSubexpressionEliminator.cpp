@@ -48,8 +48,8 @@ vector<AssemblyItem> CommonSubexpressionEliminator::getOptimizedItems()
 	{
 		m_breakingItem = nullptr;
 		m_storeOperations.clear();
-		m_initialState = move(nextInitialState);
-		m_state = move(nextState);
+		m_initialState = std::move(nextInitialState);
+		m_state = std::move(nextState);
 	});
 
 	map<int, Id> initialStackContents;
@@ -406,7 +406,7 @@ void CSECodeGenerator::generateClassElement(Id _c, bool _allowSequenced)
 		m_stack.erase(m_stackHeight - static_cast<int>(i));
 	}
 	appendItem(*expr.item);
-	if (expr.item->type() != Operation || instructionInfo(expr.item->instruction()).ret == 1)
+	if (expr.item->type() != Operation || instructionInfo(expr.item->instruction(), EVMVersion()).ret == 1)
 	{
 		m_stack[m_stackHeight] = _c;
 		m_classPositions[_c].insert(m_stackHeight);
@@ -414,7 +414,7 @@ void CSECodeGenerator::generateClassElement(Id _c, bool _allowSequenced)
 	else
 	{
 		assertThrow(
-			instructionInfo(expr.item->instruction()).ret == 0,
+			instructionInfo(expr.item->instruction(), EVMVersion()).ret == 0,
 			OptimizerException,
 			"Invalid number of return values."
 		);

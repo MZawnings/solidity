@@ -83,31 +83,32 @@ evmc_message EvmoneUtility::initializeMessage(bytes const& _input)
 	return msg;
 }
 
-evmc::result EvmoneUtility::executeContract(
+evmc::Result EvmoneUtility::executeContract(
 	bytes const& _functionHash,
 	evmc_address _deployedAddress
 )
 {
 	evmc_message message = initializeMessage(_functionHash);
-	message.destination = _deployedAddress;
+	message.recipient = _deployedAddress;
+	message.code_address = _deployedAddress;
 	message.kind = EVMC_CALL;
 	return m_evmHost.call(message);
 }
 
-evmc::result EvmoneUtility::deployContract(bytes const& _code)
+evmc::Result EvmoneUtility::deployContract(bytes const& _code)
 {
 	evmc_message message = initializeMessage(_code);
 	message.kind = EVMC_CREATE;
 	return m_evmHost.call(message);
 }
 
-evmc::result EvmoneUtility::deployAndExecute(
+evmc::Result EvmoneUtility::deployAndExecute(
 	bytes const& _byteCode,
 	string const& _hexEncodedInput
 )
 {
 	// Deploy contract and signal failure if deploy failed
-	evmc::result createResult = deployContract(_byteCode);
+	evmc::Result createResult = deployContract(_byteCode);
 	solAssert(
 		createResult.status_code == EVMC_SUCCESS,
 		"SolidityEvmoneInterface: Contract creation failed"
@@ -115,7 +116,7 @@ evmc::result EvmoneUtility::deployAndExecute(
 
 	// Execute test function and signal failure if EVM reverted or
 	// did not return expected output on successful execution.
-	evmc::result callResult = executeContract(
+	evmc::Result callResult = executeContract(
 		util::fromHex(_hexEncodedInput),
 		createResult.create_address
 	);
@@ -128,7 +129,7 @@ evmc::result EvmoneUtility::deployAndExecute(
 	return callResult;
 }
 
-optional<evmc::result> EvmoneUtility::compileDeployAndExecute(string _fuzzIsabelle)
+evmc::Result EvmoneUtility::compileDeployAndExecute(string _fuzzIsabelle)
 {
 	map<string, h160> libraryAddressMap;
 	// Stage 1: Compile and deploy library if present.
@@ -136,51 +137,43 @@ optional<evmc::result> EvmoneUtility::compileDeployAndExecute(string _fuzzIsabel
 	{
 		m_compilationFramework.contractName(m_libraryName);
 		auto compilationOutput = m_compilationFramework.compileContract();
-		if (compilationOutput.has_value())
-		{
-			CompilerOutput cOutput = compilationOutput.value();
-			// Deploy contract and signal failure if deploy failed
-			evmc::result createResult = deployContract(cOutput.byteCode);
-			solAssert(
-				createResult.status_code == EVMC_SUCCESS,
-				"SolidityEvmoneInterface: Library deployment failed"
-			);
-			libraryAddressMap[m_libraryName] = EVMHost::convertFromEVMC(createResult.create_address);
-			m_compilationFramework.libraryAddresses(libraryAddressMap);
-		}
-		else
-			return {};
+		solAssert(compilationOutput.has_value(), "Compiling library failed");
+		CompilerOutput cOutput = compilationOutput.value();
+		// Deploy contract and signal failure if deploy failed
+		evmc::Result createResult = deployContract(cOutput.byteCode);
+		solAssert(
+			createResult.status_code == EVMC_SUCCESS,
+			"SolidityEvmoneInterface: Library deployment failed"
+		);
+		libraryAddressMap[m_libraryName] = EVMHost::convertFromEVMC(createResult.create_address);
+		m_compilationFramework.libraryAddresses(libraryAddressMap);
 	}
 
 	// Stage 2: Compile, deploy, and execute contract, optionally using library
 	// address map.
 	m_compilationFramework.contractName(m_contractName);
 	auto cOutput = m_compilationFramework.compileContract();
-	if (cOutput.has_value())
-	{
-		solAssert(
-			!cOutput->byteCode.empty() && !cOutput->methodIdentifiersInContract.empty(),
-			"SolidityEvmoneInterface: Invalid compilation output."
-		);
+	solAssert(cOutput.has_value(), "Compiling contract failed");
+	solAssert(
+		!cOutput->byteCode.empty() && !cOutput->methodIdentifiersInContract.empty(),
+		"SolidityEvmoneInterface: Invalid compilation output."
+	);
 
-		string methodName;
-		if (!_fuzzIsabelle.empty())
-			// TODO: Remove this once a cleaner solution is found for querying
-			// isabelle test entry point. At the moment, we are sure that the
-			// entry point is the second method in the contract (hence the ++)
-			// but not its name.
-			methodName = (++cOutput->methodIdentifiersInContract.begin())->asString() +
-				_fuzzIsabelle.substr(2, _fuzzIsabelle.size());
-		else
-			methodName = cOutput->methodIdentifiersInContract[m_methodName].asString();
-
-		return deployAndExecute(
-			cOutput->byteCode,
-			methodName
-		);
-	}
+	string methodName;
+	if (!_fuzzIsabelle.empty())
+		// TODO: Remove this once a cleaner solution is found for querying
+		// isabelle test entry point. At the moment, we are sure that the
+		// entry point is the second method in the contract (hence the ++)
+		// but not its name.
+		methodName = (++cOutput->methodIdentifiersInContract.begin())->asString() +
+			_fuzzIsabelle.substr(2, _fuzzIsabelle.size());
 	else
-		return {};
+		methodName = cOutput->methodIdentifiersInContract[m_methodName].asString();
+
+	return deployAndExecute(
+		cOutput->byteCode,
+		methodName
+	);
 }
 
 optional<CompilerOutput> EvmoneUtility::compileContract()

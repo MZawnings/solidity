@@ -61,7 +61,7 @@ CallGraph FunctionCallGraphBuilder::buildCreationGraph(ContractDefinition const&
 	builder.m_currentNode = CallGraph::SpecialNode::Entry;
 	builder.processQueue();
 
-	return move(builder.m_graph);
+	return std::move(builder.m_graph);
 }
 
 CallGraph FunctionCallGraphBuilder::buildDeployedGraph(
@@ -109,7 +109,7 @@ CallGraph FunctionCallGraphBuilder::buildDeployedGraph(
 	builder.m_currentNode = CallGraph::SpecialNode::Entry;
 	builder.processQueue();
 
-	return move(builder.m_graph);
+	return std::move(builder.m_graph);
 }
 
 bool FunctionCallGraphBuilder::visit(FunctionCall const& _functionCall)
@@ -201,6 +201,20 @@ bool FunctionCallGraphBuilder::visit(MemberAccess const& _memberAccess)
 		solAssert(*_memberAccess.annotation().requiredLookup == VirtualLookup::Static, "");
 
 	functionReferenced(*functionDef, _memberAccess.annotation().calledDirectly);
+	return true;
+}
+
+bool FunctionCallGraphBuilder::visit(BinaryOperation const& _binaryOperation)
+{
+	if (*_binaryOperation.annotation().userDefinedFunction != nullptr)
+		functionReferenced(**_binaryOperation.annotation().userDefinedFunction, true /* called directly */);
+	return true;
+}
+
+bool FunctionCallGraphBuilder::visit(UnaryOperation const& _unaryOperation)
+{
+	if (*_unaryOperation.annotation().userDefinedFunction != nullptr)
+		functionReferenced(**_unaryOperation.annotation().userDefinedFunction, true /* called directly */);
 	return true;
 }
 

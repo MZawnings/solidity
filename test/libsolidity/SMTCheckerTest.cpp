@@ -29,6 +29,16 @@ using namespace solidity::frontend::test;
 
 SMTCheckerTest::SMTCheckerTest(string const& _filename): SyntaxTest(_filename, EVMVersion{})
 {
+	auto contract = m_reader.stringSetting("SMTContract", "");
+	if (!contract.empty())
+		m_modelCheckerSettings.contracts.contracts[""] = {contract};
+
+	auto extCallsMode = ModelCheckerExtCalls::fromString(m_reader.stringSetting("SMTExtCalls", "untrusted"));
+	if (extCallsMode)
+		m_modelCheckerSettings.externalCalls = *extCallsMode;
+	else
+		BOOST_THROW_EXCEPTION(runtime_error("Invalid SMT external calls mode."));
+
 	auto const& showUnproved = m_reader.stringSetting("SMTShowUnproved", "yes");
 	if (showUnproved == "no")
 		m_modelCheckerSettings.showUnproved = false;
@@ -37,11 +47,17 @@ SMTCheckerTest::SMTCheckerTest(string const& _filename): SyntaxTest(_filename, E
 	else
 		BOOST_THROW_EXCEPTION(runtime_error("Invalid SMT \"show unproved\" choice."));
 
+	auto const& showUnsupported = m_reader.stringSetting("SMTShowUnsupported", "yes");
+	if (showUnsupported == "no")
+		m_modelCheckerSettings.showUnsupported = false;
+	else if (showUnsupported == "yes")
+		m_modelCheckerSettings.showUnsupported = true;
+	else
+		BOOST_THROW_EXCEPTION(runtime_error("Invalid SMT \"show unsupported\" choice."));
+
 	m_modelCheckerSettings.solvers = smtutil::SMTSolverChoice::None();
-	auto const& choice = m_reader.stringSetting("SMTSolvers", "any");
-	if (choice == "any")
-		m_modelCheckerSettings.solvers = smtutil::SMTSolverChoice::All();
-	else if (choice == "none")
+	auto const& choice = m_reader.stringSetting("SMTSolvers", "z3");
+	if (choice == "none")
 		m_modelCheckerSettings.solvers = smtutil::SMTSolverChoice::None();
 	else if (!m_modelCheckerSettings.solvers.setSolver(choice))
 		BOOST_THROW_EXCEPTION(runtime_error("Invalid SMT solver choice."));
@@ -49,8 +65,13 @@ SMTCheckerTest::SMTCheckerTest(string const& _filename): SyntaxTest(_filename, E
 	m_modelCheckerSettings.solvers &= ModelChecker::availableSolvers();
 
 	/// Underflow and Overflow are not enabled by default for Solidity >=0.8.7,
-	/// so we explicitly enable all targets for the tests.
-	m_modelCheckerSettings.targets = ModelCheckerTargets::All();
+	/// so we explicitly enable all targets for the tests,
+	/// if the targets were not explicitly set by the test.
+	auto targets = ModelCheckerTargets::fromString(m_reader.stringSetting("SMTTargets", "all"));
+	if (targets)
+		m_modelCheckerSettings.targets = *targets;
+	else
+		BOOST_THROW_EXCEPTION(runtime_error("Invalid SMT targets."));
 
 	auto engine = ModelCheckerEngine::fromString(m_reader.stringSetting("SMTEngine", "all"));
 	if (engine)
@@ -61,7 +82,7 @@ SMTCheckerTest::SMTCheckerTest(string const& _filename): SyntaxTest(_filename, E
 	if (m_modelCheckerSettings.solvers.none() || m_modelCheckerSettings.engine.none())
 		m_shouldRun = false;
 
-	auto const& ignoreCex = m_reader.stringSetting("SMTIgnoreCex", "no");
+	auto const& ignoreCex = m_reader.stringSetting("SMTIgnoreCex", "yes");
 	if (ignoreCex == "no")
 		m_ignoreCex = false;
 	else if (ignoreCex == "yes")
@@ -77,7 +98,7 @@ SMTCheckerTest::SMTCheckerTest(string const& _filename): SyntaxTest(_filename, E
 		return filtered;
 	};
 	if (m_modelCheckerSettings.invariants.invariants.empty())
-		m_expectations = removeInv(move(m_expectations));
+		m_expectations = removeInv(std::move(m_expectations));
 
 	auto const& ignoreInv = m_reader.stringSetting("SMTIgnoreInv", "yes");
 	if (ignoreInv == "no")
@@ -127,5 +148,8 @@ void SMTCheckerTest::filterObtainedErrors()
 	};
 
 	if (m_ignoreCex)
+	{
+		removeCex(m_expectations);
 		removeCex(m_errorList);
+	}
 }

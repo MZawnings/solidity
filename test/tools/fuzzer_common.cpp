@@ -48,7 +48,9 @@ static vector<EVMVersion> s_evmVersions = {
 	EVMVersion::constantinople(),
 	EVMVersion::petersburg(),
 	EVMVersion::istanbul(),
-	EVMVersion::berlin()
+	EVMVersion::berlin(),
+	EVMVersion::london(),
+	EVMVersion::paris()
 };
 
 void FuzzerUtil::testCompilerJsonInterface(string const& _input, bool _optimize, bool _quiet)
@@ -106,8 +108,11 @@ void FuzzerUtil::testCompiler(
 			frontend::ModelCheckerContracts::Default(),
 			/*divModWithSlacks*/true,
 			frontend::ModelCheckerEngine::All(),
+			frontend::ModelCheckerExtCalls{},
 			frontend::ModelCheckerInvariants::All(),
+			/*showProvedSafe=*/false,
 			/*showUnproved=*/false,
+			/*showUnsupported=*/false,
 			smtutil::SMTSolverChoice::All(),
 			frontend::ModelCheckerTargets::Default(),
 			/*timeout=*/1
@@ -187,7 +192,7 @@ void FuzzerUtil::testConstantOptimizer(string const& _input, bool _quiet)
 
 	for (bool isCreation: {false, true})
 	{
-		Assembly assembly{isCreation, {}};
+		Assembly assembly{langutil::EVMVersion{}, isCreation, {}};
 		for (u256 const& n: numbers)
 		{
 			if (!_quiet)

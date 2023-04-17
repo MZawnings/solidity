@@ -31,7 +31,7 @@
 
 #include <libsolutil/CommonData.h>
 
-#include <boost/algorithm/cxx11/all_of.hpp>
+#include <range/v3/algorithm/all_of.hpp>
 
 #include <optional>
 #include <variant>
@@ -43,7 +43,7 @@ using namespace solidity::yul::unusedFunctionsCommon;
 
 void UnusedFunctionParameterPruner::run(OptimiserStepContext& _context, Block& _ast)
 {
-	map<YulString, size_t> references = ReferencesCounter::countReferences(_ast);
+	map<YulString, size_t> references = VariableReferencesCounter::countReferences(_ast);
 	auto used = [&](auto v) -> bool { return references.count(v.name); };
 
 	// Function name and a pair of boolean masks, the first corresponds to parameters and the second
@@ -64,7 +64,7 @@ void UnusedFunctionParameterPruner::run(OptimiserStepContext& _context, Block& _
 		{
 			FunctionDefinition const& f = std::get<FunctionDefinition>(statement);
 
-			if (tooSimpleToBePruned(f) || boost::algorithm::all_of(f.parameters + f.returnVariables, used))
+			if (tooSimpleToBePruned(f) || ranges::all_of(f.parameters + f.returnVariables, used))
 				continue;
 
 			usedParametersAndReturnVariables[f.name] = {
@@ -118,7 +118,7 @@ void UnusedFunctionParameterPruner::run(OptimiserStepContext& _context, Block& _
 				originalFunction.returnVariables =
 					filter(originalFunction.returnVariables, used.second);
 
-				return make_vector<Statement>(move(originalFunction), move(linkingFunction));
+				return make_vector<Statement>(std::move(originalFunction), std::move(linkingFunction));
 			}
 		}
 

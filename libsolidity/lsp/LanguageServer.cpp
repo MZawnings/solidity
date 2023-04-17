@@ -25,6 +25,7 @@
 #include <libsolidity/lsp/Utils.h>
 
 // LSP feature implementations
+#include <libsolidity/lsp/DocumentHoverHandler.h>
 #include <libsolidity/lsp/GotoDefinition.h>
 #include <libsolidity/lsp/RenameSymbol.h>
 #include <libsolidity/lsp/SemanticTokensBuilder.h>
@@ -32,6 +33,7 @@
 #include <liblangutil/SourceReferenceExtractor.h>
 #include <liblangutil/CharStream.h>
 
+#include <libsolutil/CommonIO.h>
 #include <libsolutil/Visitor.h>
 #include <libsolutil/JSON.h>
 
@@ -42,6 +44,8 @@
 #include <ostream>
 #include <string>
 
+#include <fmt/format.h>
+
 using namespace std;
 using namespace std::string_literals;
 using namespace std::placeholders;
@@ -50,8 +54,24 @@ using namespace solidity::lsp;
 using namespace solidity::langutil;
 using namespace solidity::frontend;
 
+namespace fs = boost::filesystem;
+
 namespace
 {
+
+bool resolvesToRegularFile(boost::filesystem::path _path, int maxRecursionDepth = 10)
+{
+	fs::file_status fileStatus = fs::status(_path);
+
+	while (fileStatus.type() == fs::file_type::symlink_file && maxRecursionDepth > 0)
+	{
+		_path = boost::filesystem::read_symlink(_path);
+		fileStatus = fs::status(_path);
+		maxRecursionDepth--;
+	}
+
+	return fileStatus.type() == fs::file_type::regular_file;
+}
 
 int toDiagnosticSeverity(Error::Type _errorType)
 {
@@ -118,13 +138,14 @@ LanguageServer::LanguageServer(Transport& _transport):
 		{"cancelRequest", [](auto, auto) {/*nothing for now as we are synchronous */}},
 		{"exit", [this](auto, auto) { m_state = (m_state == State::ShutdownRequested ? State::ExitRequested : State::ExitWithoutShutdown); }},
 		{"initialize", bind(&LanguageServer::handleInitialize, this, _1, _2)},
-		{"initialized", [](auto, auto) {}},
+		{"initialized", bind(&LanguageServer::handleInitialized, this, _1, _2)},
 		{"$/setTrace", [this](auto, Json::Value const& args) { setTrace(args["value"]); }},
 		{"shutdown", [this](auto, auto) { m_state = State::ShutdownRequested; }},
 		{"textDocument/definition", GotoDefinition(*this) },
 		{"textDocument/didOpen", bind(&LanguageServer::handleTextDocumentDidOpen, this, _2)},
 		{"textDocument/didChange", bind(&LanguageServer::handleTextDocumentDidChange, this, _2)},
 		{"textDocument/didClose", bind(&LanguageServer::handleTextDocumentDidClose, this, _2)},
+		{"textDocument/hover", DocumentHoverHandler(*this) },
 		{"textDocument/rename", RenameSymbol(*this) },
 		{"textDocument/implementation", GotoDefinition(*this) },
 		{"textDocument/semanticTokens/full", bind(&LanguageServer::semanticTokensFull, this, _1, _2)},
@@ -147,6 +168,26 @@ Json::Value LanguageServer::toJson(SourceLocation const& _location)
 
 void LanguageServer::changeConfiguration(Json::Value const& _settings)
 {
+	// The settings item: "file-load-strategy" (enum) defaults to "project-directory" if not (or not correctly) set.
+	// It can be overridden during client's handshake or at runtime, as usual.
+	//
+	// If this value is set to "project-directory" (default), all .sol files located inside the project directory or reachable through symbolic links will be subject to operations.
+	//
+	// Operations include compiler analysis, but also finding all symbolic references or symbolic renaming.
+	//
+	// If this value is set to "directly-opened-and-on-import", then only currently directly opened files and
+	// those files being imported directly or indirectly will be included in operations.
+	if (_settings["file-load-strategy"])
+	{
+		auto const text = _settings["file-load-strategy"].asString();
+		if (text == "project-directory")
+			m_fileLoadStrategy = FileLoadStrategy::ProjectDirectory;
+		else if (text == "directly-opened-and-on-import")
+			m_fileLoadStrategy = FileLoadStrategy::DirectlyOpenedAndOnImported;
+		else
+			lspRequire(false, ErrorCode::InvalidParams, "Invalid file load strategy: " + text);
+	}
+
 	m_settingsObject = _settings;
 	Json::Value jsonIncludePaths = _settings["include-paths"];
 
@@ -163,7 +204,7 @@ void LanguageServer::changeConfiguration(Json::Value const& _settings)
 				else
 					typeFailureCount++;
 			}
-			m_fileRepository.setIncludePaths(move(includePaths));
+			m_fileRepository.setIncludePaths(std::move(includePaths));
 		}
 		else
 			++typeFailureCount;
@@ -171,6 +212,28 @@ void LanguageServer::changeConfiguration(Json::Value const& _settings)
 		if (typeFailureCount)
 			m_client.trace("Invalid JSON configuration passed. \"include-paths\" must be an array of strings.");
 	}
+}
+
+vector<boost::filesystem::path> LanguageServer::allSolidityFilesFromProject() const
+{
+	vector<fs::path> collectedPaths{};
+
+	// We explicitly decided against including all files from include paths but leave the possibility
+	// open for a future PR to enable such a feature to be optionally enabled (default disabled).
+	// Note: Newer versions of boost have deprecated symlink_option::recurse
+#if (BOOST_VERSION < 107200)
+	auto directoryIterator = fs::recursive_directory_iterator(m_fileRepository.basePath(), fs::symlink_option::recurse);
+#else
+	auto directoryIterator = fs::recursive_directory_iterator(m_fileRepository.basePath(), fs::directory_options::follow_directory_symlink);
+#endif
+	for (fs::directory_entry const& dirEntry: directoryIterator)
+		if (
+			dirEntry.path().extension() == ".sol" &&
+			(dirEntry.status().type() == fs::file_type::regular_file || resolvesToRegularFile(dirEntry.path()))
+		)
+			collectedPaths.push_back(dirEntry.path());
+
+	return collectedPaths;
 }
 
 void LanguageServer::compile()
@@ -181,6 +244,18 @@ void LanguageServer::compile()
 	FileRepository oldRepository(m_fileRepository.basePath(), m_fileRepository.includePaths());
 	swap(oldRepository, m_fileRepository);
 
+	// Load all solidity files from project.
+	if (m_fileLoadStrategy == FileLoadStrategy::ProjectDirectory)
+		for (auto const& projectFile: allSolidityFilesFromProject())
+		{
+			lspDebug(fmt::format("adding project file: {}", projectFile.generic_string()));
+			m_fileRepository.setSourceByUri(
+				m_fileRepository.sourceUnitNameToUri(projectFile.generic_string()),
+				util::readFileAsString(projectFile)
+			);
+		}
+
+	// Overwrite all files as opened by the client, including the ones which might potentially have changes.
 	for (string const& fileName: m_openFiles)
 		m_fileRepository.setSourceByUri(
 			fileName,
@@ -217,10 +292,10 @@ void LanguageServer::compileAndUpdateDiagnostics()
 		jsonDiag["source"] = "solc";
 		jsonDiag["severity"] = toDiagnosticSeverity(error->type());
 		jsonDiag["code"] = Json::UInt64{error->errorId().error};
-		string message = error->typeName() + ":";
+		string message = Error::formatErrorType(error->type()) + ":";
 		if (string const* comment = error->comment())
 			message += " " + *comment;
-		jsonDiag["message"] = move(message);
+		jsonDiag["message"] = std::move(message);
 		jsonDiag["range"] = toRange(*location);
 
 		if (auto const* secondary = error->secondarySourceLocation())
@@ -249,8 +324,8 @@ void LanguageServer::compileAndUpdateDiagnostics()
 		params["uri"] = m_fileRepository.sourceUnitNameToUri(sourceUnitName);
 		if (!diagnostics.empty())
 			m_nonemptyDiagnostics.insert(sourceUnitName);
-		params["diagnostics"] = move(diagnostics);
-		m_client.notify("textDocument/publishDiagnostics", move(params));
+		params["diagnostics"] = std::move(diagnostics);
+		m_client.notify("textDocument/publishDiagnostics", std::move(params));
 	}
 }
 
@@ -269,6 +344,7 @@ bool LanguageServer::run()
 			{
 				string const methodName = (*jsonMessage)["method"].asString();
 				id = (*jsonMessage)["id"];
+				lspDebug(fmt::format("received method call: {}", methodName));
 
 				if (auto handler = util::valueOrDefault(m_handlers, methodName))
 					handler(id, (*jsonMessage)["params"]);
@@ -277,6 +353,10 @@ bool LanguageServer::run()
 			}
 			else
 				m_client.error({}, ErrorCode::ParseError, "\"method\" has to be a string.");
+		}
+		catch (Json::Exception const&)
+		{
+			m_client.error(id, ErrorCode::InvalidParams, "JSON object access error. Most likely due to a badly formatted JSON request message."s);
 		}
 		catch (RequestError const& error)
 		{
@@ -292,7 +372,7 @@ bool LanguageServer::run()
 
 void LanguageServer::requireServerInitialized()
 {
-	lspAssert(
+	lspRequire(
 		m_state == State::Initialized,
 		ErrorCode::ServerNotInitialized,
 		"Server is not properly initialized."
@@ -301,7 +381,7 @@ void LanguageServer::requireServerInitialized()
 
 void LanguageServer::handleInitialize(MessageID _id, Json::Value const& _args)
 {
-	lspAssert(
+	lspRequire(
 		m_state == State::Started,
 		ErrorCode::RequestFailed,
 		"Initialize called at the wrong time."
@@ -315,7 +395,7 @@ void LanguageServer::handleInitialize(MessageID _id, Json::Value const& _args)
 	if (Json::Value uri = _args["rootUri"])
 	{
 		rootPath = uri.asString();
-		lspAssert(
+		lspRequire(
 			boost::starts_with(rootPath, "file://"),
 			ErrorCode::InvalidParams,
 			"rootUri only supports file URI scheme."
@@ -343,8 +423,15 @@ void LanguageServer::handleInitialize(MessageID _id, Json::Value const& _args)
 	replyArgs["capabilities"]["semanticTokensProvider"]["range"] = false;
 	replyArgs["capabilities"]["semanticTokensProvider"]["full"] = true; // XOR requests.full.delta = true
 	replyArgs["capabilities"]["renameProvider"] = true;
+	replyArgs["capabilities"]["hoverProvider"] = true;
 
-	m_client.reply(_id, move(replyArgs));
+	m_client.reply(_id, std::move(replyArgs));
+}
+
+void LanguageServer::handleInitialized(MessageID, Json::Value const&)
+{
+	if (m_fileLoadStrategy == FileLoadStrategy::ProjectDirectory)
+		compileAndUpdateDiagnostics();
 }
 
 void LanguageServer::semanticTokensFull(MessageID _id, Json::Value const& _args)
@@ -391,7 +478,7 @@ void LanguageServer::handleTextDocumentDidOpen(Json::Value const& _args)
 {
 	requireServerInitialized();
 
-	lspAssert(
+	lspRequire(
 		_args["textDocument"],
 		ErrorCode::RequestFailed,
 		"Text document parameter missing."
@@ -400,7 +487,7 @@ void LanguageServer::handleTextDocumentDidOpen(Json::Value const& _args)
 	string text = _args["textDocument"]["text"].asString();
 	string uri = _args["textDocument"]["uri"].asString();
 	m_openFiles.insert(uri);
-	m_fileRepository.setSourceByUri(uri, move(text));
+	m_fileRepository.setSourceByUri(uri, std::move(text));
 	compileAndUpdateDiagnostics();
 }
 
@@ -412,14 +499,14 @@ void LanguageServer::handleTextDocumentDidChange(Json::Value const& _args)
 
 	for (Json::Value jsonContentChange: _args["contentChanges"])
 	{
-		lspAssert(
+		lspRequire(
 			jsonContentChange.isObject(),
 			ErrorCode::RequestFailed,
 			"Invalid content reference."
 		);
 
 		string const sourceUnitName = m_fileRepository.uriToSourceUnitName(uri);
-		lspAssert(
+		lspRequire(
 			m_fileRepository.sourceUnits().count(sourceUnitName),
 			ErrorCode::RequestFailed,
 			"Unknown file: " + uri
@@ -429,17 +516,17 @@ void LanguageServer::handleTextDocumentDidChange(Json::Value const& _args)
 		if (jsonContentChange["range"].isObject()) // otherwise full content update
 		{
 			optional<SourceLocation> change = parseRange(m_fileRepository, sourceUnitName, jsonContentChange["range"]);
-			lspAssert(
+			lspRequire(
 				change && change->hasText(),
 				ErrorCode::RequestFailed,
 				"Invalid source range: " + util::jsonCompactPrint(jsonContentChange["range"])
 			);
 
 			string buffer = m_fileRepository.sourceUnits().at(sourceUnitName);
-			buffer.replace(static_cast<size_t>(change->start), static_cast<size_t>(change->end - change->start), move(text));
-			text = move(buffer);
+			buffer.replace(static_cast<size_t>(change->start), static_cast<size_t>(change->end - change->start), std::move(text));
+			text = std::move(buffer);
 		}
-		m_fileRepository.setSourceByUri(uri, move(text));
+		m_fileRepository.setSourceByUri(uri, std::move(text));
 	}
 
 	compileAndUpdateDiagnostics();
@@ -449,7 +536,7 @@ void LanguageServer::handleTextDocumentDidClose(Json::Value const& _args)
 {
 	requireServerInitialized();
 
-	lspAssert(
+	lspRequire(
 		_args["textDocument"],
 		ErrorCode::RequestFailed,
 		"Text document parameter missing."
@@ -461,19 +548,21 @@ void LanguageServer::handleTextDocumentDidClose(Json::Value const& _args)
 	compileAndUpdateDiagnostics();
 }
 
-
 ASTNode const* LanguageServer::astNodeAtSourceLocation(std::string const& _sourceUnitName, LineColumn const& _filePos)
 {
-	if (m_compilerStack.state() < CompilerStack::AnalysisPerformed)
-		return nullptr;
-
-	if (!m_fileRepository.sourceUnits().count(_sourceUnitName))
-		return nullptr;
-
-	if (optional<int> sourcePos =
-		m_compilerStack.charStream(_sourceUnitName).translateLineColumnToPosition(_filePos))
-		return locateInnermostASTNode(*sourcePos, m_compilerStack.ast(_sourceUnitName));
-	else
-		return nullptr;
+	return get<ASTNode const*>(astNodeAndOffsetAtSourceLocation(_sourceUnitName, _filePos));
 }
 
+tuple<ASTNode const*, int> LanguageServer::astNodeAndOffsetAtSourceLocation(std::string const& _sourceUnitName, LineColumn const& _filePos)
+{
+	if (m_compilerStack.state() < CompilerStack::AnalysisPerformed)
+		return {nullptr, -1};
+	if (!m_fileRepository.sourceUnits().count(_sourceUnitName))
+		return {nullptr, -1};
+
+	optional<int> sourcePos = m_compilerStack.charStream(_sourceUnitName).translateLineColumnToPosition(_filePos);
+	if (!sourcePos)
+		return {nullptr, -1};
+
+	return {locateInnermostASTNode(*sourcePos, m_compilerStack.ast(_sourceUnitName)), *sourcePos};
+}

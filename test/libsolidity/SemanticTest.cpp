@@ -48,12 +48,13 @@ namespace fs = boost::filesystem;
 SemanticTest::SemanticTest(
 	string const& _filename,
 	langutil::EVMVersion _evmVersion,
+	optional<uint8_t> _eofVersion,
 	vector<boost::filesystem::path> const& _vmPaths,
 	bool _enforceCompileToEwasm,
 	bool _enforceGasCost,
 	u256 _enforceGasCostMinValue
 ):
-	SolidityExecutionFramework(_evmVersion, _vmPaths),
+	SolidityExecutionFramework(_evmVersion, _eofVersion, _vmPaths, false),
 	EVMVersionRestrictedTestCase(_filename),
 	m_sources(m_reader.sources()),
 	m_lineOffset(m_reader.lineNumber()),
@@ -61,7 +62,7 @@ SemanticTest::SemanticTest(
 	m_sideEffectHooks(makeSideEffectHooks()),
 	m_enforceCompileToEwasm(_enforceCompileToEwasm),
 	m_enforceGasCost(_enforceGasCost),
-	m_enforceGasCostMinValue(move(_enforceGasCostMinValue))
+	m_enforceGasCostMinValue(std::move(_enforceGasCostMinValue))
 {
 	static set<string> const compileViaYulAllowedValues{"also", "true", "false"};
 	static set<string> const yulRunTriggers{"also", "true"};
@@ -296,13 +297,13 @@ TestCase::TestResult SemanticTest::run(ostream& _stream, string const& _linePref
 {
 	TestResult result = TestResult::Success;
 
-	if (m_testCaseWantsLegacyRun)
+	if (m_testCaseWantsLegacyRun && !m_eofVersion.has_value())
 		result = runTest(_stream, _linePrefix, _formatted, false, false);
 
 	if (m_testCaseWantsYulRun && result == TestResult::Success)
 		result = runTest(_stream, _linePrefix, _formatted, true, false);
 
-	if ((m_testCaseWantsEwasmRun || m_enforceCompileToEwasm) && result == TestResult::Success)
+	if (!m_eofVersion.has_value() && (m_testCaseWantsEwasmRun || m_enforceCompileToEwasm) && result == TestResult::Success)
 	{
 		// TODO: Once we have full Ewasm support, we could remove try/catch here.
 		try
@@ -457,14 +458,14 @@ TestCase::TestResult SemanticTest::runTest(
 				success = false;
 
 			test.setFailure(!m_transactionSuccessful);
-			test.setRawBytes(move(output));
+			test.setRawBytes(std::move(output));
 			test.setContractABI(m_compiler.contractABI(m_compiler.lastContractName(m_sources.mainSourceFile)));
 		}
 
 		vector<string> effects;
 		for (SideEffectHook const& hook: m_sideEffectHooks)
 			effects += hook(test.call());
-		test.setSideEffects(move(effects));
+		test.setSideEffects(std::move(effects));
 
 		success &= test.call().expectedSideEffects == test.call().actualSideEffects;
 	}

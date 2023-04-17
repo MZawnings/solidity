@@ -121,7 +121,7 @@ void IRGenerationContext::addStateVariable(
 	unsigned _byteOffset
 )
 {
-	m_stateVariables[&_declaration] = make_pair(move(_storageOffset), _byteOffset);
+	m_stateVariables[&_declaration] = make_pair(std::move(_storageOffset), _byteOffset);
 }
 
 string IRGenerationContext::newYulVariable()
@@ -137,12 +137,12 @@ void IRGenerationContext::initializeInternalDispatch(InternalDispatchMap _intern
 		for (auto function: functions)
 			enqueueFunctionForCodeGeneration(*function);
 
-	m_internalDispatchMap = move(_internalDispatch);
+	m_internalDispatchMap = std::move(_internalDispatch);
 }
 
 InternalDispatchMap IRGenerationContext::consumeInternalDispatchMap()
 {
-	InternalDispatchMap internalDispatch = move(m_internalDispatchMap);
+	InternalDispatchMap internalDispatch = std::move(m_internalDispatchMap);
 	m_internalDispatchMap.clear();
 	return internalDispatch;
 }
@@ -176,18 +176,4 @@ YulUtilFunctions IRGenerationContext::utils()
 ABIFunctions IRGenerationContext::abiFunctions()
 {
 	return ABIFunctions(m_evmVersion, m_revertStrings, m_functions);
-}
-
-uint64_t IRGenerationContext::internalFunctionID(FunctionDefinition const& _function, bool _requirePresent)
-{
-	auto [iterator, inserted] = m_functionIDs.try_emplace(_function.id(), m_functionIDs.size() + 1);
-	if (_requirePresent)
-			solAssert(!inserted, "");
-	return iterator->second;
-}
-
-void IRGenerationContext::copyFunctionIDsFrom(IRGenerationContext const& _other)
-{
-	solAssert(m_functionIDs.empty(), "");
-	m_functionIDs = _other.m_functionIDs;
 }

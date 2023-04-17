@@ -20,6 +20,8 @@
 
 #include <test/libsolidity/util/SoltestErrors.h>
 
+#include <test/Common.h>
+
 #include <libsolutil/AnsiColorized.h>
 
 #include <libyul/YulStack.h>
@@ -65,6 +67,7 @@ TestCase::TestResult ObjectCompilerTest::run(ostream& _stream, string const& _li
 {
 	YulStack stack(
 		EVMVersion(),
+		nullopt,
 		m_wasm ? YulStack::Language::Ewasm : YulStack::Language::StrictAssembly,
 		OptimiserSettings::preset(m_optimisationPreset),
 		DebugInfoSelection::All()
@@ -100,7 +103,7 @@ TestCase::TestResult ObjectCompilerTest::run(ostream& _stream, string const& _li
 				"Bytecode: " +
 				util::toHex(obj.bytecode->bytecode) +
 				"\nOpcodes: " +
-				boost::trim_copy(evmasm::disassemble(obj.bytecode->bytecode)) +
+				boost::trim_copy(evmasm::disassemble(obj.bytecode->bytecode, solidity::test::CommonOptions::get().evmVersion())) +
 				"\nSourceMappings:" +
 				(obj.sourceMappings->empty() ? "" : " " + *obj.sourceMappings) +
 				"\n";

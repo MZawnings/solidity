@@ -35,6 +35,8 @@
 #include <libsolutil/StringUtils.h>
 #include <libsolutil/Visitor.h>
 
+#include <libevmasm/Instruction.h>
+
 #include <boost/algorithm/string.hpp>
 
 #include <fmt/format.h>
@@ -116,7 +118,6 @@ vector<YulString> AsmAnalyzer::operator()(Literal const& _literal)
 			nativeLocationOf(_literal),
 			"Invalid type \"" + _literal.type.str() + "\" for literal \"" + _literal.value.str() + "\"."
 		);
-
 
 	return {_literal.type};
 }
@@ -310,6 +311,14 @@ vector<YulString> AsmAnalyzer::operator()(FunctionCall const& _funCall)
 
 	if (BuiltinFunction const* f = m_dialect.builtin(_funCall.functionName.name))
 	{
+		if (_funCall.functionName.name == "selfdestruct"_yulstring)
+			m_errorReporter.warning(
+				1699_error,
+				nativeLocationOf(_funCall.functionName),
+				"\"selfdestruct\" has been deprecated. "
+				"The underlying opcode will eventually undergo breaking changes, "
+				"and its use is not recommended."
+			);
 		parameterTypes = &f->parameters;
 		returnTypes = &f->returns;
 		if (!f->literalArguments.empty())
@@ -617,7 +626,6 @@ Scope& AsmAnalyzer::scope(Block const* _block)
 void AsmAnalyzer::expectValidIdentifier(YulString _identifier, SourceLocation const& _location)
 {
 	// NOTE: the leading dot case is handled by the parser not allowing it.
-
 	if (boost::ends_with(_identifier.str(), "."))
 		m_errorReporter.syntaxError(
 			3384_error,
@@ -690,7 +698,7 @@ bool AsmAnalyzer::validateInstructions(evmasm::Instruction _instr, SourceLocatio
 			_location,
 			fmt::format(
 				"The \"{instruction}\" instruction is {kind} VMs (you are currently compiling for \"{version}\").",
-				fmt::arg("instruction", boost::to_lower_copy(instructionInfo(_instr).name)),
+				fmt::arg("instruction", boost::to_lower_copy(instructionInfo(_instr, m_evmVersion).name)),
 				fmt::arg("kind", vmKindMessage),
 				fmt::arg("version", m_evmVersion.name())
 			)

@@ -9,13 +9,18 @@
 ## If the given branch is "release", the resulting package will be uploaded to
 ## ethereum/ethereum PPA, or ethereum/ethereum-dev PPA otherwise.
 ##
-## The gnupg key for "builds@ethereum.org" has to be present in order to sign
-## the package.
-##
 ## It will clone the Solidity git from github, determine the version,
 ## create a source archive and push it to the ubuntu ppa servers.
 ##
-## This requires the following entries in /etc/dput.cf:
+## To interact with launchpad, you need to set the variables $LAUNCHPAD_EMAIL
+## and $LAUNCHPAD_KEYID in the file .release_ppa_auth in the root directory of
+## the project to your launchpad email and pgp keyid.
+## This could for example look like this:
+##
+##  LAUNCHPAD_EMAIL=your-launchpad-email@ethereum.org
+##  LAUNCHPAD_KEYID=123ABCFFFFFFFF
+##
+## Additionally the following entries in /etc/dput.cf are required:
 ##
 ##  [ethereum-dev]
 ##  fqdn			= ppa.launchpad.net
@@ -34,11 +39,16 @@
 ##  method			= ftp
 ##  incoming		= ~ethereum/ethereum-static
 ##  login			= anonymous
-
 ##
 ##############################################################################
 
-set -ev
+set -e
+
+
+REPO_ROOT="$(dirname "$0")/.."
+
+# shellcheck source=scripts/common.sh
+source "${REPO_ROOT}/scripts/common.sh"
 
 if [ -z "$1" ]
 then
@@ -51,17 +61,25 @@ is_release() {
     [[ "${branch}" =~ ^v[0-9]+(\.[0-9]+)*$ ]]
 }
 
-keyid=379F4801D622CDCF
-email=builds@ethereum.org
+sourcePPAConfig
+
 packagename=solc
 
-static_build_distribution=impish
+# This needs to be a still active release
+static_build_distribution=focal
 
-DISTRIBUTIONS="focal impish jammy kinetic"
+DISTRIBUTIONS="focal jammy kinetic"
 
 if is_release
 then
     DISTRIBUTIONS="$DISTRIBUTIONS STATIC"
+
+    # Sanity checks
+    checkDputEntries "\[ethereum\]"
+    checkDputEntries "\[ethereum-static\]"
+else
+    # Sanity check
+    checkDputEntries "\[ethereum-dev\]"
 fi
 
 for distribution in $DISTRIBUTIONS
@@ -155,7 +173,7 @@ Build-Depends: ${SMTDEPENDENCY}debhelper (>= 9.0.0),
                scons
 Standards-Version: 3.9.5
 Homepage: https://ethereum.org
-Vcs-Git: git://github.com/ethereum/solidity.git
+Vcs-Git: https://github.com/ethereum/solidity.git
 Vcs-Browser: https://github.com/ethereum/solidity
 
 Package: solc
@@ -199,7 +217,7 @@ override_dh_shlibdeps:
 	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
 
 override_dh_auto_configure:
-	dh_auto_configure -- -DTESTS=OFF ${CMAKE_OPTIONS}
+	dh_auto_configure -- -DTESTS=OFF -DFETCHCONTENT_FULLY_DISCONNECTED=OFF ${CMAKE_OPTIONS}
 EOF
 cat <<EOF > debian/copyright
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
@@ -245,7 +263,7 @@ chmod +x debian/rules
 
 versionsuffix=0ubuntu1~${distribution}
 # bump version / add entry to changelog
-EMAIL="$email" dch -v "1:${debversion}-${versionsuffix}" "git build of ${commithash}"
+EMAIL="$LAUNCHPAD_EMAIL" dch -v "1:${debversion}-${versionsuffix}" "git build of ${commithash}"
 
 
 # build source package
@@ -287,7 +305,7 @@ fi
 )
 
 # sign the package
-debsign --re-sign -k "${keyid}" "../${packagename}_${debversion}-${versionsuffix}_source.changes"
+debsign --re-sign -k "${LAUNCHPAD_KEYID}" "../${packagename}_${debversion}-${versionsuffix}_source.changes"
 
 # upload
 dput "${pparepo}" "../${packagename}_${debversion}-${versionsuffix}_source.changes"

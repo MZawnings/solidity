@@ -47,7 +47,8 @@ function gnosis_safe_test
         "${compile_only_presets[@]}"
         #ir-no-optimize            # Compilation fails with "YulException: Variable var_call_430_mpos is 1 slot(s) too deep inside the stack."
         #ir-optimize-evm-only      # Compilation fails with "YulException: Variable var_call_430_mpos is 1 slot(s) too deep inside the stack."
-        ir-optimize-evm+yul
+        # TODO: Uncomment the preset below when the issue: https://github.com/safe-global/safe-contracts/issues/544 is solved.
+        #ir-optimize-evm+yul       # Compilation fails with "YulException: Cannot swap Variable var_operation with Variable _1: too deep in the stack by 4 slots."
         legacy-no-optimize
         legacy-optimize-evm-only
         legacy-optimize-evm+yul
@@ -66,26 +67,15 @@ function gnosis_safe_test
     sed -i 's|"@openzeppelin/contracts": "\^3\.4\.0"|"@openzeppelin/contracts": "^4.0.0"|g' package.json
 
     # Disable two tests failing due to Hardhat's heuristics not yet updated to handle solc 0.8.10.
-    # TODO: Remove this when Hardhat implements them (https://github.com/nomiclabs/hardhat/issues/2051).
-    sed -i "s|\(it\)\(('should revert if called directly', async () => {\)|\1.skip\2|g" test/handlers/CompatibilityFallbackHandler.spec.ts
+    # TODO: Remove this when Hardhat implements them (https://github.com/nomiclabs/hardhat/issues/2451).
+    sed -i "s|\(it\)\((\"should revert if called directly\"\)|\1.skip\2|g" test/handlers/CompatibilityFallbackHandler.spec.ts
 
     # Disable tests that won't pass on the ir presets due to Hardhat heuristics. Note that this also disables
     # them for other presets but that's fine - we want same code run for benchmarks to be comparable.
-    # TODO: Remove this when Hardhat adjusts heuristics for IR (https://github.com/nomiclabs/hardhat/issues/2115).
-    sed -i "s|\(it\)\(('should not allow to call setup on singleton'\)|\1.skip\2|g" test/core/GnosisSafe.Setup.spec.ts
-    # TODO: Remove this when https://github.com/NomicFoundation/hardhat/issues/2453 gets fixed.
-    sed -i 's|\(it\)\(("changes the expected storage slot without touching the most important ones"\)|\1.skip\2|g' test/libraries/SignMessageLib.spec.ts
-    sed -i "s|\(it\)\(('can be used only via DELEGATECALL opcode'\)|\1.skip\2|g" test/libraries/SignMessageLib.spec.ts
-    sed -i 's|\(describe\)\(("Upgrade from Safe 1.1.1"\)|\1.skip\2|g' test/migration/UpgradeFromSafe111.spec.ts
-    sed -i 's|\(describe\)\(("Upgrade from Safe 1.2.0"\)|\1.skip\2|g' test/migration/UpgradeFromSafe120.spec.ts
-
-    # TODO: Remove this when Gnosis merges https://github.com/gnosis/safe-contracts/pull/394
-    sed -i "s|\(function isValidSignature(bytes \)calldata\( _data, bytes \)calldata\( _signature)\)|\1memory\2memory\3|g" contracts/handler/CompatibilityFallbackHandler.sol
-
-    # TODO: Remove this when https://github.com/NomicFoundation/hardhat/issues/2453 gets fixed.
-    sed -i "s|it\(('should enforce delegatecall'\)|it.skip\1|g" test/accessors/SimulateTxAccessor.spec.ts
-    sed -i "s|it\(('can only be called from Safe itself'\)|it.skip\1|g" test/libraries/Migration.spec.ts
-    sed -i "s|it\(('should enforce delegatecall to MultiSend'\)|it.skip\1|g" test/libraries/MultiSend.spec.ts
+    # TODO: Remove this when Hardhat adjusts heuristics for IR (https://github.com/nomiclabs/hardhat/issues/3365).
+    sed -i "s|\(it\)\((\"should not allow to call setup on singleton\"\)|\1.skip\2|g" test/core/Safe.Setup.spec.ts
+    sed -i "s|\(it\)\((\"can be used only via DELEGATECALL opcode\"\)|\1.skip\2|g" test/libraries/SignMessageLib.spec.ts
+    sed -i "s|it\((\"can only be called from Safe itself\"\)|it.skip\1|g" test/libraries/Migration.spec.ts
 
     neutralize_package_lock
     neutralize_package_json_hooks
@@ -93,22 +83,6 @@ function gnosis_safe_test
     force_hardhat_compiler_settings "$config_file" "$(first_word "$SELECTED_PRESETS")" "$config_var"
     npm install
     npm install hardhat-gas-reporter
-
-    # Typescript compilation fails with typescript >= 4.7:
-    # Error: Debug Failure. False expression: Non-string value passed to `ts.resolveTypeReferenceDirective`
-    npm install "typescript@<4.7.0"
-
-    # With ethers.js 5.6.2 many tests for revert messages fail.
-    # TODO: Remove when https://github.com/ethers-io/ethers.js/discussions/2849 is resolved.
-    npm install ethers@5.6.1
-
-    # Note that ethers@5.6.1 depends on @ethersproject/contracts@5.6.0 while the dependency on hardhat-deploy
-    # pulls @ethersproject/contracts@5.6.1 (latest). Force 5.6.0 to avoid errors due to having two copies.
-    npm install @ethersproject/contracts@5.6.0
-
-    # Hardhat 2.9.5 introduced a bug with handling padded arguments to getStorageAt().
-    # TODO: Remove when https://github.com/NomicFoundation/hardhat/issues/2709 is fixed.
-    npm install hardhat@2.9.4
 
     replace_version_pragmas
     [[ $BINARY_TYPE == solcjs ]] && force_solc_modules "${DIR}/solc/dist"

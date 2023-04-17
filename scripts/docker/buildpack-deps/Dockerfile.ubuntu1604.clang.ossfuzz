@@ -22,7 +22,7 @@
 # (c) 2016-2021 solidity contributors.
 #------------------------------------------------------------------------------
 FROM gcr.io/oss-fuzz-base/base-clang:latest as base
-LABEL version="18"
+LABEL version="23"
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -46,22 +46,22 @@ FROM base AS libraries
 # Boost
 RUN set -ex; \
     cd /usr/src; \
-    wget -q 'https://boostorg.jfrog.io/artifactory/main/release/1.73.0/source/boost_1_73_0.tar.bz2' -O boost.tar.bz2; \
-    test "$(sha256sum boost.tar.bz2)" = "4eb3b8d442b426dc35346235c8733b5ae35ba431690e38c6a8263dce9fcbb402  boost.tar.bz2"; \
+    wget -q 'https://boostorg.jfrog.io/artifactory/main/release/1.74.0/source/boost_1_74_0.tar.bz2' -O boost.tar.bz2; \
+    test "$(sha256sum boost.tar.bz2)" = "83bfc1507731a0906e387fc28b7ef5417d591429e51e788417fe9ff025e116b1  boost.tar.bz2" && \
     tar -xf boost.tar.bz2; \
     rm boost.tar.bz2; \
-    cd boost_1_73_0; \
+    cd boost_1_74_0; \
     CXXFLAGS="-stdlib=libc++ -pthread" LDFLAGS="-stdlib=libc++" ./bootstrap.sh --with-toolset=clang --prefix=/usr; \
     ./b2 toolset=clang cxxflags="-stdlib=libc++ -pthread" linkflags="-stdlib=libc++ -pthread" headers; \
     ./b2 toolset=clang cxxflags="-stdlib=libc++ -pthread" linkflags="-stdlib=libc++ -pthread" \
         link=static variant=release runtime-link=static \
         system filesystem unit_test_framework program_options \
         install -j $(($(nproc)/2)); \
-    rm -rf /usr/src/boost_1_73_0
+    rm -rf /usr/src/boost_1_74_0
 
 # Z3
 RUN set -ex; \
-    git clone --depth 1 -b z3-4.8.17 https://github.com/Z3Prover/z3.git \
+    git clone --depth 1 -b z3-4.12.1 https://github.com/Z3Prover/z3.git \
     /usr/src/z3; \
     cd /usr/src/z3; \
     mkdir build; \
@@ -93,7 +93,7 @@ RUN set -ex; \
 # EVMONE
 RUN set -ex; \
 	cd /usr/src; \
-	git clone --branch="v0.8.2" --recurse-submodules https://github.com/ethereum/evmone.git; \
+	git clone --branch="v0.9.1" --recurse-submodules https://github.com/ethereum/evmone.git; \
 	cd evmone; \
 	mkdir build; \
 	cd build; \

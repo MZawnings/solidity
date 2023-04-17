@@ -83,9 +83,55 @@
 #include <limits>
 #include <tuple>
 
+#ifdef PROFILE_OPTIMIZER_STEPS
+#include <chrono>
+#include <fmt/format.h>
+#endif
+
 using namespace std;
 using namespace solidity;
 using namespace solidity::yul;
+#ifdef PROFILE_OPTIMIZER_STEPS
+using namespace std::chrono;
+#endif
+
+namespace
+{
+
+#ifdef PROFILE_OPTIMIZER_STEPS
+void outputPerformanceMetrics(map<string, int64_t> const& _metrics)
+{
+	vector<pair<string, int64_t>> durations(_metrics.begin(), _metrics.end());
+	sort(
+		durations.begin(),
+		durations.end(),
+		[](pair<string, int64_t> const& _lhs, pair<string, int64_t> const& _rhs) -> bool
+		{
+			return _lhs.second < _rhs.second;
+		}
+	);
+
+	int64_t totalDurationInMicroseconds = 0;
+	for (auto&& [step, durationInMicroseconds]: durations)
+		totalDurationInMicroseconds += durationInMicroseconds;
+
+	cerr << "Performance metrics of optimizer steps" << endl;
+	cerr << "======================================" << endl;
+	constexpr double microsecondsInSecond = 1000000;
+	for (auto&& [step, durationInMicroseconds]: durations)
+	{
+		double percentage = 100.0 * static_cast<double>(durationInMicroseconds) / static_cast<double>(totalDurationInMicroseconds);
+		double sec = static_cast<double>(durationInMicroseconds) / microsecondsInSecond;
+		cerr << fmt::format("{:>7.3f}% ({} s): {}", percentage, sec, step) << endl;
+	}
+	double totalDurationInSeconds = static_cast<double>(totalDurationInMicroseconds) / microsecondsInSecond;
+	cerr << "--------------------------------------" << endl;
+	cerr << fmt::format("{:>7}% ({:.3f} s)", 100, totalDurationInSeconds) << endl;
+}
+#endif
+
+}
+
 
 void OptimiserSuite::run(
 	Dialect const& _dialect,
@@ -93,6 +139,7 @@ void OptimiserSuite::run(
 	Object& _object,
 	bool _optimizeStackAllocation,
 	string_view _optimisationSequence,
+	string_view _optimisationCleanupSequence,
 	optional<size_t> _expectedExecutionsPerDeployment,
 	set<YulString> const& _externallyUsedIdentifiers
 )
@@ -139,7 +186,13 @@ void OptimiserSuite::run(
 			_optimizeStackAllocation,
 			stackCompressorMaxIterations
 		);
-	suite.runSequence("fDnTOc g", ast);
+
+	// Run the user-supplied clean up sequence
+	suite.runSequence(_optimisationCleanupSequence, ast);
+	// Hard-coded FunctionGrouper step is used to bring the AST into a canonical form required by the StackCompressor
+	// and StackLimitEvader. This is hard-coded as the last step, as some previously executed steps may break the
+	// aforementioned form, thus causing the StackCompressor/StackLimitEvader to throw.
+	suite.runSequence("g", ast);
 
 	if (evmDialect)
 	{
@@ -171,12 +224,15 @@ void OptimiserSuite::run(
 	NameSimplifier::run(suite.m_context, ast);
 	VarNameCleaner::run(suite.m_context, ast);
 
+#ifdef PROFILE_OPTIMIZER_STEPS
+	outputPerformanceMetrics(suite.m_durationPerStepInMicroseconds);
+#endif
+
 	*_object.analysisInfo = AsmAnalyzer::analyzeStrictAssertCorrect(_dialect, _object);
 }
 
 namespace
 {
-
 
 template <class... Step>
 map<string, unique_ptr<OptimiserStep>> optimiserStepCollection()
@@ -296,6 +352,7 @@ map<char, string> const& OptimiserSuite::stepAbbreviationToNameMap()
 void OptimiserSuite::validateSequence(string_view _stepAbbreviations)
 {
 	int8_t nestingLevel = 0;
+	int8_t colonDelimiters = 0;
 	for (char abbreviation: _stepAbbreviations)
 		switch (abbreviation)
 		{
@@ -309,6 +366,11 @@ void OptimiserSuite::validateSequence(string_view _stepAbbreviations)
 		case ']':
 			nestingLevel--;
 			assertThrow(nestingLevel >= 0, OptimizerException, "Unbalanced brackets");
+			break;
+		case ':':
+			++colonDelimiters;
+			assertThrow(nestingLevel == 0, OptimizerException, "Cleanup sequence delimiter cannot be placed inside the brackets");
+			assertThrow(colonDelimiters <= 1, OptimizerException, "Too many cleanup sequence delimiters");
 			break;
 		default:
 		{
@@ -432,7 +494,14 @@ void OptimiserSuite::runSequence(std::vector<string> const& _steps, Block& _ast)
 	{
 		if (m_debug == Debug::PrintStep)
 			cout << "Running " << step << endl;
+#ifdef PROFILE_OPTIMIZER_STEPS
+		steady_clock::time_point startTime = steady_clock::now();
+#endif
 		allSteps().at(step)->run(m_context, _ast);
+#ifdef PROFILE_OPTIMIZER_STEPS
+		steady_clock::time_point endTime = steady_clock::now();
+		m_durationPerStepInMicroseconds[step] += duration_cast<microseconds>(endTime - startTime).count();
+#endif
 		if (m_debug == Debug::PrintChanges)
 		{
 			// TODO should add switch to also compare variable names!

@@ -52,7 +52,7 @@ AssemblyItem const& Assembly::append(AssemblyItem _i)
 {
 	assertThrow(m_deposit >= 0, AssemblyException, "Stack underflow.");
 	m_deposit += static_cast<int>(_i.deposit());
-	m_items.emplace_back(move(_i));
+	m_items.emplace_back(std::move(_i));
 	if (!m_items.back().location().isValid() && m_currentSourceLocation.isValid())
 		m_items.back().setLocation(m_currentSourceLocation);
 	m_items.back().m_modifierDepth = m_currentModifierDepth;
@@ -237,7 +237,7 @@ Json::Value Assembly::assemblyJSON(map<string, unsigned> const& _sourceIndices, 
 				sourceIndex = static_cast<int>(iter->second);
 		}
 
-		auto [name, data] = item.nameAndData();
+		auto [name, data] = item.nameAndData(m_evmVersion);
 		Json::Value jsonItem;
 		jsonItem["name"] = name;
 		jsonItem["begin"] = item.location().start;
@@ -254,7 +254,7 @@ Json::Value Assembly::assemblyJSON(map<string, unsigned> const& _sourceIndices, 
 		if (!data.empty())
 			jsonItem["value"] = data;
 		jsonItem["source"] = sourceIndex;
-		code.append(move(jsonItem));
+		code.append(std::move(jsonItem));
 
 		if (item.type() == AssemblyItemType::Tag)
 		{
@@ -265,7 +265,7 @@ Json::Value Assembly::assemblyJSON(map<string, unsigned> const& _sourceIndices, 
 			jumpdest["source"] = sourceIndex;
 			if (item.m_modifierDepth != 0)
 				jumpdest["modifierDepth"] = static_cast<int>(item.m_modifierDepth);
-			code.append(move(jumpdest));
+			code.append(std::move(jumpdest));
 		}
 	}
 	if (_includeSourceList)
@@ -464,7 +464,7 @@ map<u256, u256> const& Assembly::optimiseInternal(
 			}
 			if (optimisedItems.size() < m_items.size())
 			{
-				m_items = move(optimisedItems);
+				m_items = std::move(optimisedItems);
 				count++;
 			}
 		}
@@ -478,7 +478,7 @@ map<u256, u256> const& Assembly::optimiseInternal(
 			*this
 		);
 
-	m_tagReplacements = move(tagReplacements);
+	m_tagReplacements = std::move(tagReplacements);
 	return *m_tagReplacements;
 }
 
@@ -560,11 +560,18 @@ LinkerObject const& Assembly::assemble() const
 			break;
 		case Push:
 		{
-			unsigned b = max<unsigned>(1, numberEncodingSize(i.data()));
+			unsigned b = numberEncodingSize(i.data());
+			if (b == 0 && !m_evmVersion.hasPush0())
+			{
+				b = 1;
+			}
 			ret.bytecode.push_back(static_cast<uint8_t>(pushInstruction(b)));
-			ret.bytecode.resize(ret.bytecode.size() + b);
-			bytesRef byr(&ret.bytecode.back() + 1 - b, b);
-			toBigEndian(i.data(), byr);
+			if (b > 0)
+			{
+				ret.bytecode.resize(ret.bytecode.size() + b);
+				bytesRef byr(&ret.bytecode.back() + 1 - b, b);
+				toBigEndian(i.data(), byr);
+			}
 			break;
 		}
 		case PushTag:
@@ -679,13 +686,25 @@ LinkerObject const& Assembly::assemble() const
 		// Append an INVALID here to help tests find miscompilation.
 		ret.bytecode.push_back(static_cast<uint8_t>(Instruction::INVALID));
 
+	map<LinkerObject, size_t> subAssemblyOffsets;
 	for (auto const& [subIdPath, bytecodeOffset]: subRef)
 	{
+		LinkerObject subObject = subAssemblyById(subIdPath)->assemble();
 		bytesRef r(ret.bytecode.data() + bytecodeOffset, bytesPerDataRef);
-		toBigEndian(ret.bytecode.size(), r);
-		ret.append(subAssemblyById(subIdPath)->assemble());
-	}
 
+		// In order for de-duplication to kick in, not only must the bytecode be identical, but
+		// link and immutables references as well.
+		if (size_t* subAssemblyOffset = util::valueOrNullptr(subAssemblyOffsets, subObject))
+			toBigEndian(*subAssemblyOffset, r);
+		else
+		{
+			toBigEndian(ret.bytecode.size(), r);
+			subAssemblyOffsets[subObject] = ret.bytecode.size();
+			ret.bytecode += subObject.bytecode;
+		}
+		for (auto const& ref: subObject.linkReferences)
+			ret.linkReferences[ref.first + subAssemblyOffsets[subObject]] = ref.second;
+	}
 	for (auto const& i: tagRef)
 	{
 		size_t subId;
@@ -791,4 +810,19 @@ Assembly const* Assembly::subAssemblyById(size_t _subId) const
 
 	assertThrow(currentAssembly != this, AssemblyException, "");
 	return currentAssembly;
+}
+
+Assembly::OptimiserSettings Assembly::OptimiserSettings::translateSettings(frontend::OptimiserSettings const& _settings, langutil::EVMVersion const& _evmVersion)
+{
+	// Constructing it this way so that we notice changes in the fields.
+	evmasm::Assembly::OptimiserSettings asmSettings{false,  false, false, false, false, false, _evmVersion, 0};
+	asmSettings.runInliner = _settings.runInliner;
+	asmSettings.runJumpdestRemover = _settings.runJumpdestRemover;
+	asmSettings.runPeephole = _settings.runPeephole;
+	asmSettings.runDeduplicate = _settings.runDeduplicate;
+	asmSettings.runCSE = _settings.runCSE;
+	asmSettings.runConstantOptimiser = _settings.runConstantOptimiser;
+	asmSettings.expectedExecutionsPerDeployment = _settings.expectedExecutionsPerDeployment;
+	asmSettings.evmVersion = _evmVersion;
+	return asmSettings;
 }

@@ -439,7 +439,7 @@ u256 EwasmBuiltinInterpreter::evalEthBuiltin(string const& _fun, vector<uint64_t
 	}
 	else if (_fun == "getExternalCodeSize")
 		// Generate "random" code length.
-		return uint32_t(u256(keccak256(h256(readAddress(arg[0])))) & 0xfff);
+		return uint32_t(u256(keccak256(h256(readAddress(arg[0]), h256::AlignLeft))) & 0xfff);
 	else if (_fun == "getGasLeft")
 		return 0x99;
 	else if (_fun == "getBlockGasLimit")
@@ -597,7 +597,7 @@ u256 EwasmBuiltinInterpreter::readU256(uint64_t _offset, size_t _croppedTo)
 
 void EwasmBuiltinInterpreter::logTrace(evmasm::Instruction _instruction, std::vector<u256> const& _arguments, bytes const& _data)
 {
-	logTrace(evmasm::instructionInfo(_instruction).name, _arguments, _data);
+	logTrace(evmasm::instructionInfo(_instruction, langutil::EVMVersion()).name, _arguments, _data);
 }
 
 void EwasmBuiltinInterpreter::logTrace(std::string const& _pseudoInstruction, std::vector<u256> const& _arguments, bytes const& _data)

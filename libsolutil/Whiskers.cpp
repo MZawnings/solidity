@@ -32,8 +32,9 @@ using namespace std;
 using namespace solidity::util;
 
 Whiskers::Whiskers(string _template):
-	m_template(move(_template))
+	m_template(std::move(_template))
 {
+	checkTemplateValid();
 }
 
 Whiskers& Whiskers::operator()(string _parameter, string _value)
@@ -41,7 +42,7 @@ Whiskers& Whiskers::operator()(string _parameter, string _value)
 	checkParameterValid(_parameter);
 	checkParameterUnknown(_parameter);
 	checkTemplateContainsTags(_parameter, {""});
-	m_parameters[move(_parameter)] = move(_value);
+	m_parameters[std::move(_parameter)] = std::move(_value);
 	return *this;
 }
 
@@ -50,7 +51,7 @@ Whiskers& Whiskers::operator()(string _parameter, bool _value)
 	checkParameterValid(_parameter);
 	checkParameterUnknown(_parameter);
 	checkTemplateContainsTags(_parameter, {"?", "/"});
-	m_conditions[move(_parameter)] = _value;
+	m_conditions[std::move(_parameter)] = _value;
 	return *this;
 }
 
@@ -65,13 +66,24 @@ Whiskers& Whiskers::operator()(
 	for (auto const& element: _values)
 		for (auto const& val: element)
 			checkParameterValid(val.first);
-	m_listParameters[move(_listParameter)] = move(_values);
+	m_listParameters[std::move(_listParameter)] = std::move(_values);
 	return *this;
 }
 
 string Whiskers::render() const
 {
 	return replace(m_template, m_parameters, m_conditions, m_listParameters);
+}
+
+void Whiskers::checkTemplateValid() const
+{
+	regex validTemplate("<[#?!\\/]\\+{0,1}[a-zA-Z0-9_$-]+(?:[^a-zA-Z0-9_$>-]|$)");
+	smatch match;
+	assertThrow(
+		!regex_search(m_template, match, validTemplate),
+		WhiskersError,
+		"Template contains an invalid/unclosed tag " + match.str()
+	);
 }
 
 void Whiskers::checkParameterValid(string const& _parameter) const

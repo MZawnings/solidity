@@ -40,8 +40,16 @@ class SolidityExecutionFramework: public solidity::test::ExecutionFramework
 
 public:
 	SolidityExecutionFramework(): m_showMetadata(solidity::test::CommonOptions::get().showMetadata) {}
-	explicit SolidityExecutionFramework(langutil::EVMVersion _evmVersion, std::vector<boost::filesystem::path> const& _vmPaths):
-		ExecutionFramework(_evmVersion, _vmPaths), m_showMetadata(solidity::test::CommonOptions::get().showMetadata)
+	explicit SolidityExecutionFramework(
+		langutil::EVMVersion _evmVersion,
+		std::optional<uint8_t> _eofVersion,
+		std::vector<boost::filesystem::path> const& _vmPaths,
+		bool _appendCBORMetadata = true
+	):
+		ExecutionFramework(_evmVersion, _vmPaths),
+		m_eofVersion(_eofVersion),
+		m_showMetadata(solidity::test::CommonOptions::get().showMetadata),
+		m_appendCBORMetadata(_appendCBORMetadata)
 	{}
 
 	bytes const& compileAndRunWithoutCheck(
@@ -76,10 +84,12 @@ public:
 	static std::string addPreamble(std::string const& _sourceCode);
 protected:
 	using CompilerStack = solidity::frontend::CompilerStack;
+	std::optional<uint8_t> m_eofVersion;
 	CompilerStack m_compiler;
 	bool m_compileViaYul = false;
 	bool m_compileToEwasm = false;
 	bool m_showMetadata = false;
+	bool m_appendCBORMetadata = true;
 	CompilerStack::MetadataHash m_metadataHash = CompilerStack::MetadataHash::IPFS;
 	RevertStrings m_revertStrings = RevertStrings::Default;
 };

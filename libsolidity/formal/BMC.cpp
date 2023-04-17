@@ -18,6 +18,7 @@
 
 #include <libsolidity/formal/BMC.h>
 
+#include <libsolidity/formal/ModelChecker.h>
 #include <libsolidity/formal/SymbolicTypes.h>
 
 #include <libsmtutil/SMTPortfolio.h>
@@ -38,12 +39,13 @@ using namespace solidity::frontend;
 BMC::BMC(
 	smt::EncodingContext& _context,
 	UniqueErrorReporter& _errorReporter,
+	UniqueErrorReporter& _unsupportedErrorReporter,
 	map<h256, string> const& _smtlib2Responses,
 	ReadCallback::Callback const& _smtCallback,
-	ModelCheckerSettings const& _settings,
+	ModelCheckerSettings _settings,
 	CharStreamProvider const& _charStreamProvider
 ):
-	SMTEncoder(_context, _settings, _errorReporter, _charStreamProvider),
+	SMTEncoder(_context, _settings, _errorReporter, _unsupportedErrorReporter, _charStreamProvider),
 	m_interface(make_unique<smtutil::SMTPortfolio>(_smtlib2Responses, _smtCallback, _settings.solvers, _settings.timeout))
 {
 #if defined (HAVE_Z3) || defined (HAVE_CVC4)
@@ -61,28 +63,27 @@ BMC::BMC(
 
 void BMC::analyze(SourceUnit const& _source, map<ASTNode const*, set<VerificationTargetType>, smt::EncodingContext::IdCompare> _solvedTargets)
 {
-	if (m_interface->solvers() == 0)
+	// At this point every enabled solver is available.
+	if (!m_settings.solvers.cvc4 && !m_settings.solvers.smtlib2 && !m_settings.solvers.z3)
 	{
 		m_errorReporter.warning(
 			7710_error,
 			SourceLocation(),
 			"BMC analysis was not possible since no SMT solver was found and enabled."
-#ifdef HAVE_Z3_DLOPEN
-			" Install libz3.so." + to_string(Z3_MAJOR_VERSION) + "." + to_string(Z3_MINOR_VERSION) + " to enable Z3."
-#endif
+			" The accepted solvers for BMC are cvc4 and z3."
 		);
 		return;
 	}
 
 	SMTEncoder::resetSourceAnalysis();
 
-	m_solvedTargets = move(_solvedTargets);
+	m_solvedTargets = std::move(_solvedTargets);
 	m_context.setSolver(m_interface.get());
 	m_context.reset();
 	m_context.setAssertionAccumulation(true);
 	m_variableUsage.setFunctionInlining(shouldInlineFunctionCall);
 	createFreeConstants(sourceDependencies(_source));
-	state().prepareForSourceUnit(_source);
+	state().prepareForSourceUnit(_source, false);
 	m_unprovedAmt = 0;
 
 	_source.accept(*this);
@@ -98,6 +99,26 @@ void BMC::analyze(SourceUnit const& _source, map<ASTNode const*, set<Verificatio
 			" Consider choosing a specific contract to be verified in order to reduce the solving problems." +
 			" Consider increasing the timeout per query."
 		);
+
+	if (!m_settings.showProvedSafe && !m_safeTargets.empty())
+		m_errorReporter.info(
+			6002_error,
+			"BMC: " +
+			to_string(m_safeTargets.size()) +
+			" verification condition(s) proved safe!" +
+			" Enable the model checker option \"show proved safe\" to see all of them."
+		);
+	else if (m_settings.showProvedSafe)
+		for (auto const& [node, targets]: m_safeTargets)
+			for (auto const& target: targets)
+				m_errorReporter.info(
+					2961_error,
+					node->location(),
+					"BMC: " +
+					targetDescription(target) +
+					" check is safe!"
+				);
+
 
 	// If this check is true, Z3 and CVC4 are not available
 	// and the query answers were not provided, since SMTPortfolio
@@ -130,7 +151,7 @@ bool BMC::shouldInlineFunctionCall(
 
 	FunctionType const& funType = dynamic_cast<FunctionType const&>(*_funCall.expression().annotation().type);
 	if (funType.kind() == FunctionType::Kind::External)
-		return isTrustedExternalCall(&_funCall.expression());
+		return isExternalCallToThis(&_funCall.expression());
 	else if (funType.kind() != FunctionType::Kind::Internal)
 		return false;
 
@@ -567,13 +588,13 @@ void BMC::internalOrExternalFunctionCall(FunctionCall const& _funCall)
 	auto const& funType = dynamic_cast<FunctionType const&>(*_funCall.expression().annotation().type);
 	if (shouldInlineFunctionCall(_funCall, currentScopeContract(), m_currentContract))
 		inlineFunctionCall(_funCall);
-	else if (isPublicGetter(_funCall.expression()))
+	else if (publicGetter(_funCall.expression()))
 	{
 		// Do nothing here.
 		// The processing happens in SMT Encoder, but we need to prevent the resetting of the state variables.
 	}
 	else if (funType.kind() == FunctionType::Kind::Internal)
-		m_errorReporter.warning(
+		m_unsupportedErrors.warning(
 			5729_error,
 			_funCall.location(),
 			"BMC does not yet implement this type of function call."
@@ -686,13 +707,37 @@ pair<vector<smtutil::Expression>, vector<string>> BMC::modelExpressions()
 				expressionName = m_charStreamProvider.charStream(*uf->location().sourceName).text(
 					uf->location()
 				);
-			expressionNames.push_back(move(expressionName));
+			expressionNames.push_back(std::move(expressionName));
 		}
 
 	return {expressionsToEvaluate, expressionNames};
 }
 
 /// Verification targets.
+
+string BMC::targetDescription(BMCVerificationTarget const& _target)
+{
+	if (
+		_target.type == VerificationTargetType::Underflow ||
+		_target.type == VerificationTargetType::Overflow
+	)
+	{
+		auto const* intType = dynamic_cast<IntegerType const*>(_target.expression->annotation().type);
+		if (!intType)
+			intType = TypeProvider::uint256();
+
+		if (_target.type == VerificationTargetType::Underflow)
+			return "Underflow (resulting value less than " + formatNumberReadable(intType->minValue()) + ")";
+		return "Overflow (resulting value larger than " + formatNumberReadable(intType->maxValue()) + ")";
+	}
+	else if (_target.type == VerificationTargetType::DivByZero)
+		return "Division by zero";
+	else if (_target.type == VerificationTargetType::Assert)
+		return "Assertion violation";
+	else if (_target.type == VerificationTargetType::Balance)
+		return "Insufficient funds";
+	solAssert(false);
+}
 
 void BMC::checkVerificationTargets()
 {
@@ -762,13 +807,13 @@ void BMC::checkUnderflow(BMCVerificationTarget& _target)
 		intType = TypeProvider::uint256();
 
 	checkCondition(
+		_target,
 		_target.constraints && _target.value < smt::minValue(*intType),
 		_target.callStack,
 		_target.modelExpressions,
 		_target.expression->location(),
 		4144_error,
 		8312_error,
-		"Underflow (resulting value less than " + formatNumberReadable(intType->minValue()) + ")",
 		"<result>",
 		&_target.value
 	);
@@ -795,13 +840,13 @@ void BMC::checkOverflow(BMCVerificationTarget& _target)
 		intType = TypeProvider::uint256();
 
 	checkCondition(
+		_target,
 		_target.constraints && _target.value > smt::maxValue(*intType),
 		_target.callStack,
 		_target.modelExpressions,
 		_target.expression->location(),
 		2661_error,
 		8065_error,
-		"Overflow (resulting value larger than " + formatNumberReadable(intType->maxValue()) + ")",
 		"<result>",
 		&_target.value
 	);
@@ -818,13 +863,13 @@ void BMC::checkDivByZero(BMCVerificationTarget& _target)
 		return;
 
 	checkCondition(
+		_target,
 		_target.constraints && (_target.value == 0),
 		_target.callStack,
 		_target.modelExpressions,
 		_target.expression->location(),
 		3046_error,
 		5272_error,
-		"Division by zero",
 		"<result>",
 		&_target.value
 	);
@@ -834,13 +879,13 @@ void BMC::checkBalance(BMCVerificationTarget& _target)
 {
 	solAssert(_target.type == VerificationTargetType::Balance, "");
 	checkCondition(
+		_target,
 		_target.constraints && _target.value,
 		_target.callStack,
 		_target.modelExpressions,
 		_target.expression->location(),
 		1236_error,
 		4010_error,
-		"Insufficient funds",
 		"address(this).balance"
 	);
 }
@@ -856,13 +901,13 @@ void BMC::checkAssert(BMCVerificationTarget& _target)
 		return;
 
 	checkCondition(
+		_target,
 		_target.constraints && !_target.value,
 		_target.callStack,
 		_target.modelExpressions,
 		_target.expression->location(),
 		4661_error,
-		7812_error,
-		"Assertion violation"
+		7812_error
 	);
 }
 
@@ -888,19 +933,19 @@ void BMC::addVerificationTarget(
 	if (_type == VerificationTargetType::ConstantCondition)
 		checkVerificationTarget(target);
 	else
-		m_verificationTargets.emplace_back(move(target));
+		m_verificationTargets.emplace_back(std::move(target));
 }
 
 /// Solving.
 
 void BMC::checkCondition(
+	BMCVerificationTarget const& _target,
 	smtutil::Expression _condition,
 	vector<SMTEncoder::CallStackEntry> const& _callStack,
 	pair<vector<smtutil::Expression>, vector<string>> const& _modelExpressions,
 	SourceLocation const& _location,
 	ErrorId _errorHappens,
 	ErrorId _errorMightHappen,
-	string const& _description,
 	string const& _additionalValueName,
 	smtutil::Expression const* _additionalValue
 )
@@ -942,7 +987,7 @@ void BMC::checkCondition(
 	{
 		solAssert(!_callStack.empty(), "");
 		std::ostringstream message;
-		message << "BMC: " << _description << " happens here.";
+		message << "BMC: " << targetDescription(_target) << " happens here.";
 
 		std::ostringstream modelMessage;
 		// Sometimes models have complex smtlib2 expressions that SMTLib2Interface fails to parse.
@@ -964,17 +1009,20 @@ void BMC::checkCondition(
 			message.str(),
 			SecondarySourceLocation().append(modelMessage.str(), SourceLocation{})
 			.append(SMTEncoder::callStackMessage(_callStack))
-			.append(move(secondaryLocation))
+			.append(std::move(secondaryLocation))
 		);
 		break;
 	}
 	case smtutil::CheckResult::UNSATISFIABLE:
+	{
+		m_safeTargets[_target.expression].insert(_target);
 		break;
+	}
 	case smtutil::CheckResult::UNKNOWN:
 	{
 		++m_unprovedAmt;
 		if (m_settings.showUnproved)
-			m_errorReporter.warning(_errorMightHappen, _location, "BMC: " + _description + " might happen here.", secondaryLocation);
+			m_errorReporter.warning(_errorMightHappen, _location, "BMC: " + targetDescription(_target) + " might happen here.", secondaryLocation);
 		break;
 	}
 	case smtutil::CheckResult::CONFLICTING:

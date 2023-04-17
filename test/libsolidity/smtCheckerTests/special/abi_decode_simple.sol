@@ -14,3 +14,4 @@ contract C {
 // Warning 2072: (140-150): Unused local variable.
 // Warning 2072: (152-156): Unused local variable.
 // Warning 6328: (220-236): CHC: Assertion violation happens here.
+// Info 1391: CHC: 1 verification condition(s) proved safe! Enable the model checker option "show proved safe" to see all of them.

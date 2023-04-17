@@ -97,12 +97,16 @@ BOOST_AUTO_TEST_CASE(storage_layout_mapping)
 		{"first", TypeProvider::fromElementaryTypeName("uint128")},
 		{"second", TypeProvider::mapping(
 			TypeProvider::fromElementaryTypeName("uint8"),
-			TypeProvider::fromElementaryTypeName("uint8")
+			"",
+			TypeProvider::fromElementaryTypeName("uint8"),
+			""
 		)},
 		{"third", TypeProvider::fromElementaryTypeName("uint16")},
 		{"final", TypeProvider::mapping(
 			TypeProvider::fromElementaryTypeName("uint8"),
-			TypeProvider::fromElementaryTypeName("uint8")
+			"",
+			TypeProvider::fromElementaryTypeName("uint8"),
+			""
 		)},
 	}));
 	BOOST_REQUIRE_EQUAL(u256(4), members.storageSize());
@@ -187,7 +191,7 @@ BOOST_AUTO_TEST_CASE(type_identifiers)
 	s.annotation().recursive = false;
 	BOOST_CHECK_EQUAL(s.type()->identifier(), "t_type$_t_struct$_Struct_$3_storage_ptr_$");
 
-	EnumDefinition e(++id, {}, make_shared<string>("Enum"), {}, {});
+	EnumDefinition e(++id, {}, make_shared<string>("Enum"), {}, {}, {});
 	BOOST_CHECK_EQUAL(e.type()->identifier(), "t_type$_t_enum$_Enum_$4_$");
 
 	TupleType t({e.type(), s.type(), stringArray, nullptr});
@@ -199,8 +203,8 @@ BOOST_AUTO_TEST_CASE(type_identifiers)
 	FunctionType metaFun(TypePointers{keccak256fun}, TypePointers{s.type()}, strings{""}, strings{""});
 	BOOST_CHECK_EQUAL(metaFun.identifier(), "t_function_internal_nonpayable$_t_function_keccak256_nonpayable$__$returns$__$_$returns$_t_type$_t_struct$_Struct_$3_storage_ptr_$_$");
 
-	Type const* m = TypeProvider::mapping(TypeProvider::fromElementaryTypeName("bytes32"), s.type());
-	MappingType m2(TypeProvider::fromElementaryTypeName("uint64"), m);
+	Type const* m = TypeProvider::mapping(TypeProvider::fromElementaryTypeName("bytes32"), "", s.type(), "");
+	MappingType m2(TypeProvider::fromElementaryTypeName("uint64"), "", m, "");
 	BOOST_CHECK_EQUAL(m2.identifier(), "t_mapping$_t_uint64_$_t_mapping$_t_bytes32_$_t_type$_t_struct$_Struct_$3_storage_ptr_$_$_$");
 
 	// TypeType is tested with contract

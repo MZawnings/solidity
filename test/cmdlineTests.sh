@@ -186,25 +186,25 @@ function test_solc_behaviour
     exitCode=$?
     set -e
 
-    if [[ " ${solc_args[*]} " == *" --standard-json "* ]]
+    if [[ " ${solc_args[*]} " == *" --standard-json "* ]] && [[ -s $stdout_path ]]
     then
         python3 - <<EOF
 import re, sys
 json = open("$stdout_path", "r").read()
 json = re.sub(r"{[^{}]*Warning: This is a pre-release compiler version[^{}]*},?", "", json)
-json = re.sub(r"},\s*]", "}]", json)                  # },] -> }]
-json = re.sub(r"\"errors\":\s*\[\s*\],?\s*","",json)  # Remove "errors" array if it's not empty
-json = re.sub("\n\\s+\n", "\n\n", json)               # Remove any leftover trailing whitespace
+json = re.sub(r"\"errors\":\s*\[\s*\],?","\n" if json[1] == " " else "",json)       # Remove "errors" array if it's not empty
+json = re.sub("\n\\s*\n", "\n", json)                                               # Remove trailing whitespace
+json = re.sub(r"},(\n{0,1})\n*(\s*(]|}))", r"}\1\2", json)                          # Remove trailing comma
 open("$stdout_path", "w").write(json)
 EOF
         sed -i.bak -E -e 's/ Consider adding \\"pragma solidity \^[0-9.]*;\\"//g' "$stdout_path"
-        sed -i.bak -E -e 's/\"opcodes\":\"[^"]+\"/\"opcodes\":\"<OPCODES REMOVED>\"/g' "$stdout_path"
-        sed -i.bak -E -e 's/\"sourceMap\":\"[0-9:;-]+\"/\"sourceMap\":\"<SOURCEMAP REMOVED>\"/g' "$stdout_path"
+        sed -i.bak -E -e 's/\"opcodes\":[[:space:]]*\"[^"]+\"/\"opcodes\":\"<OPCODES REMOVED>\"/g' "$stdout_path"
+        sed -i.bak -E -e 's/\"sourceMap\":[[:space:]]*\"[0-9:;-]+\"/\"sourceMap\":\"<SOURCEMAP REMOVED>\"/g' "$stdout_path"
 
         # Remove bytecode (but not linker references).
-        sed -i.bak -E -e 's/(\"object\":\")[0-9a-f]+([^"]*\")/\1<BYTECODE REMOVED>\2/g' "$stdout_path"
+        sed -i.bak -E -e 's/(\"object\":[[:space:]]*\")[0-9a-f]+([^"]*\")/\1<BYTECODE REMOVED>\2/g' "$stdout_path"
         # shellcheck disable=SC2016
-        sed -i.bak -E -e 's/(\"object\":\"[^"]+\$__)[0-9a-f]+(\")/\1<BYTECODE REMOVED>\2/g' "$stdout_path"
+        sed -i.bak -E -e 's/(\"object\":[[:space:]]*\"[^"]+\$__)[0-9a-f]+(\")/\1<BYTECODE REMOVED>\2/g' "$stdout_path"
         # shellcheck disable=SC2016
         sed -i.bak -E -e 's/([0-9a-f]{34}\$__)[0-9a-f]+(__\$[0-9a-f]{17})/\1<BYTECODE REMOVED>\2/g' "$stdout_path"
         # Remove metadata in assembly output (see below about the magic numbers)
@@ -215,7 +215,7 @@ EOF
         # Replace escaped newlines by actual newlines for readability
         # shellcheck disable=SC1003
         sed -i.bak -E -e 's/\\n/\'$'\n/g' "$stdout_path"
-        sed -i.bak -e 's/\(^[ ]*auxdata: \)0x[0-9a-f]*$/\1<AUXDATA REMOVED>/' "$stdout_path"
+        sed -i.bak -e 's/\(^[ ]*auxdata:[[:space:]]\)0x[0-9a-f]*$/\1<AUXDATA REMOVED>/' "$stdout_path"
         rm "$stdout_path.bak"
     else
         sed -i.bak -e '/^Warning: This is a pre-release compiler version, please do not use it in production./d' "$stderr_path"
@@ -225,6 +225,11 @@ EOF
         sed -i.bak -e 's/ Consider adding "pragma .*$//' "$stderr_path"
         sed -i.bak -e 's/\(Unimplemented feature error.* in \).*$/\1<FILENAME REMOVED>/' "$stderr_path"
         sed -i.bak -e 's/"version":[ ]*"[^"]*"/"version": "<VERSION REMOVED>"/' "$stdout_path"
+    if [[ $stdout_expectation_file != "" &&  $stderr_expectation_file != "" ]]
+    then
+        sed -i.bak -e '/^Compiler run successful\. No contracts to compile\.$/d' "$stdout_path"
+        sed -i.bak -e '/^Compiler run successful\. No output generated\.$/d' "$stdout_path"
+    fi
 
         # Remove bytecode (but not linker references). Since non-JSON output is unstructured,
         # use metadata markers for detection to have some confidence that it's actually bytecode
@@ -311,7 +316,7 @@ function test_solc_assembly_output
 function test_via_ir_equivalence()
 {
     SOLTMPDIR=$(mktemp -d)
-    pushd "$SOLTMPDIR"
+    pushd "$SOLTMPDIR" > /dev/null
 
     (( $# <= 2 )) || fail "This function accepts at most two arguments."
 
@@ -355,7 +360,7 @@ function test_via_ir_equivalence()
 
     for yul_file in $(find . -name "${output_file_prefix}*.yul" | sort -V); do
         bin_output_two_stage+=$(
-	    msg_on_error --no-stderr "$SOLC" --strict-assembly --bin "${optimizer_flags[@]}" "$yul_file" |
+        msg_on_error --no-stderr "$SOLC" --strict-assembly --bin "${optimizer_flags[@]}" "$yul_file" |
                 sed '/^Binary representation:$/d' |
                 sed '/^=======/d'
         )
@@ -369,14 +374,19 @@ function test_via_ir_equivalence()
 
     diff_values "$bin_output_two_stage" "$bin_output_via_ir" --ignore-space-change --ignore-blank-lines
 
-    popd
+    popd > /dev/null
     rm -r "$SOLTMPDIR"
 }
 
 ## RUN
 
-echo "Checking that the bug list is up to date..."
-"$REPO_ROOT"/scripts/update_bugs_by_version.py
+SOLTMPDIR=$(mktemp -d)
+printTask "Checking that the bug list is up to date..."
+cp "${REPO_ROOT}/docs/bugs_by_version.json" "${SOLTMPDIR}/original_bugs_by_version.json"
+"${REPO_ROOT}/scripts/update_bugs_by_version.py"
+diff --unified "${SOLTMPDIR}/original_bugs_by_version.json" "${REPO_ROOT}/docs/bugs_by_version.json" || \
+    fail "The bug list in bugs_by_version.json was out of date and has been updated. Please investigate and submit a bugfix if necessary."
+rm -r "$SOLTMPDIR"
 
 printTask "Testing unknown options..."
 (
@@ -453,7 +463,13 @@ printTask "Running general commandline tests..."
             inputFile=""
             stdout="$(cat "${tdir}/output.json" 2>/dev/null || true)"
             stdoutExpectationFile="${tdir}/output.json"
-            command_args="--standard-json "$(cat "${tdir}/args" 2>/dev/null || true)
+            prettyPrintFlags=""
+            if [[ ! -f "${tdir}/no-pretty-print" ]]
+            then
+                prettyPrintFlags="--pretty-json --json-indent 4"
+            fi
+
+            command_args="--standard-json ${prettyPrintFlags} "$(cat "${tdir}/args" 2>/dev/null || true)
         else
             if [ -e "${tdir}/stdin" ]
             then
@@ -657,11 +673,11 @@ SOLTMPDIR=$(mktemp -d)
 )
 rm -r "$SOLTMPDIR"
 
-printTask "Testing AST import..."
+printTask "Testing AST import/export..."
 SOLTMPDIR=$(mktemp -d)
 (
     cd "$SOLTMPDIR"
-    if ! "$REPO_ROOT/scripts/ASTImportTest.sh"
+    if ! "$REPO_ROOT/scripts/ASTImportTest.sh" ast
     then
         rm -r "$SOLTMPDIR"
         fail

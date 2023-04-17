@@ -80,20 +80,25 @@ string YulUtilFunctions::splitExternalFunctionIdFunction()
 	});
 }
 
-string YulUtilFunctions::copyToMemoryFunction(bool _fromCalldata)
+string YulUtilFunctions::copyToMemoryFunction(bool _fromCalldata, bool _cleanup)
 {
-	string functionName = "copy_" + string(_fromCalldata ? "calldata" : "memory") + "_to_memory";
+	string functionName =
+		"copy_"s +
+		(_fromCalldata ? "calldata"s : "memory"s) +
+		"_to_memory"s +
+		(_cleanup ? "_with_cleanup"s : ""s);
+
 	return m_functionCollector.createFunction(functionName, [&]() {
 		if (_fromCalldata)
 		{
 			return Whiskers(R"(
 				function <functionName>(src, dst, length) {
 					calldatacopy(dst, src, length)
-					// clear end
-					mstore(add(dst, length), 0)
+					<?cleanup>mstore(add(dst, length), 0)</cleanup>
 				}
 			)")
 			("functionName", functionName)
+			("cleanup", _cleanup)
 			.render();
 		}
 		else
@@ -105,14 +110,11 @@ string YulUtilFunctions::copyToMemoryFunction(bool _fromCalldata)
 					{
 						mstore(add(dst, i), mload(add(src, i)))
 					}
-					if gt(i, length)
-					{
-						// clear end
-						mstore(add(dst, length), 0)
-					}
+					<?cleanup>mstore(add(dst, length), 0)</cleanup>
 				}
 			)")
 			("functionName", functionName)
+			("cleanup", _cleanup)
 			.render();
 		}
 	});
@@ -231,7 +233,7 @@ string YulUtilFunctions::requireOrAssertFunction(bool _assert, Type const* _mess
 			.render();
 
 		int const hashHeaderSize = 4;
-		u256 const errorHash = util::selectorFromSignature("Error(string)");
+		u256 const errorHash = util::selectorFromSignatureU256("Error(string)");
 
 		string const encodeFunc = ABIFunctions(m_evmVersion, m_revertStrings, m_functionCollector)
 			.tupleEncoder(
@@ -682,28 +684,46 @@ string YulUtilFunctions::overflowCheckedIntMulFunction(IntegerType const& _type)
 			function <functionName>(x, y) -> product {
 				x := <cleanupFunction>(x)
 				y := <cleanupFunction>(y)
+				let product_raw := mul(x, y)
+				product := <cleanupFunction>(product_raw)
 				<?signed>
-					// overflow, if x > 0, y > 0 and x > (maxValue / y)
-					if and(and(sgt(x, 0), sgt(y, 0)), gt(x, div(<maxValue>, y))) { <panic>() }
-					// underflow, if x > 0, y < 0 and y < (minValue / x)
-					if and(and(sgt(x, 0), slt(y, 0)), slt(y, sdiv(<minValue>, x))) { <panic>() }
-					// underflow, if x < 0, y > 0 and x < (minValue / y)
-					if and(and(slt(x, 0), sgt(y, 0)), slt(x, sdiv(<minValue>, y))) { <panic>() }
-					// overflow, if x < 0, y < 0 and x < (maxValue / y)
-					if and(and(slt(x, 0), slt(y, 0)), slt(x, sdiv(<maxValue>, y))) { <panic>() }
+					<?gt128bit>
+						<?256bit>
+							// special case
+							if and(slt(x, 0), eq(y, <minValue>)) { <panic>() }
+						</256bit>
+						// overflow, if x != 0 and y != product/x
+						if iszero(
+							or(
+								iszero(x),
+								eq(y, sdiv(product, x))
+							)
+						) { <panic>() }
+					<!gt128bit>
+						if iszero(eq(product, product_raw)) { <panic>() }
+					</gt128bit>
 				<!signed>
-					// overflow, if x != 0 and y > (maxValue / x)
-					if and(iszero(iszero(x)), gt(y, div(<maxValue>, x))) { <panic>() }
+					<?gt128bit>
+						// overflow, if x != 0 and y != product/x
+						if iszero(
+							or(
+								iszero(x),
+								eq(y, div(product, x))
+							)
+						) { <panic>() }
+					<!gt128bit>
+						if iszero(eq(product, product_raw)) { <panic>() }
+					</gt128bit>
 				</signed>
-				product := mul(x, y)
 			}
 			)")
 			("functionName", functionName)
 			("signed", _type.isSigned())
-			("maxValue", toCompactHexWithPrefix(u256(_type.maxValue())))
-			("minValue", toCompactHexWithPrefix(u256(_type.minValue())))
 			("cleanupFunction", cleanupFunction(_type))
 			("panic", panicFunction(PanicCode::UnderOverflow))
+			("minValue", toCompactHexWithPrefix(u256(_type.minValue())))
+			("256bit", _type.numBits() == 256)
+			("gt128bit", _type.numBits() > 128)
 			.render();
 	});
 }
@@ -4406,7 +4426,7 @@ string YulUtilFunctions::revertReasonIfDebugBody(
 		revert(start, <overallLength>)
 	)");
 	templ("allocate", _allocation);
-	templ("sig", util::selectorFromSignature("Error(string)").str());
+	templ("sig", util::selectorFromSignatureU256("Error(string)").str());
 	templ("length", to_string(_message.length()));
 
 	size_t words = (_message.length() + 31) / 32;
@@ -4434,7 +4454,7 @@ string YulUtilFunctions::panicFunction(util::PanicCode _code)
 			}
 		)")
 		("functionName", functionName)
-		("selector", util::selectorFromSignature("Panic(uint256)").str())
+		("selector", util::selectorFromSignatureU256("Panic(uint256)").str())
 		("code", toCompactHexWithPrefix(static_cast<unsigned>(_code)))
 		.render();
 	});

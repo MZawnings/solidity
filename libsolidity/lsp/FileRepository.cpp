@@ -17,6 +17,7 @@
 // SPDX-License-Identifier: GPL-3.0
 
 #include <libsolidity/lsp/FileRepository.h>
+#include <libsolidity/lsp/Transport.h>
 #include <libsolidity/lsp/Utils.h>
 
 #include <libsolutil/StringUtils.h>
@@ -25,10 +26,13 @@
 #include <range/v3/algorithm/none_of.hpp>
 #include <range/v3/range/conversion.hpp>
 #include <range/v3/view/transform.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 
 #include <regex>
 
 #include <boost/algorithm/string/predicate.hpp>
+
+#include <fmt/format.h>
 
 using namespace std;
 using namespace solidity;
@@ -58,7 +62,7 @@ string FileRepository::sourceUnitNameToUri(string const& _sourceUnitName) const
 		if (!regex_search(inputPath, windowsDriveLetterPath))
 			return inputPath;
 		else
-			return "/" + move(inputPath);
+			return "/" + std::move(inputPath);
 	};
 
 	if (m_sourceUnitNamesToUri.count(_sourceUnitName))
@@ -84,6 +88,7 @@ string FileRepository::sourceUnitNameToUri(string const& _sourceUnitName) const
 
 string FileRepository::uriToSourceUnitName(string const& _path) const
 {
+	lspRequire(boost::algorithm::starts_with(_path, "file://"), ErrorCode::InternalError, "URI must start with file://");
 	return stripFileUriSchemePrefix(_path);
 }
 
@@ -92,6 +97,7 @@ void FileRepository::setSourceByUri(string const& _uri, string _source)
 	// This is needed for uris outside the base path. It can lead to collisions,
 	// but we need to mostly rewrite this in a future version anyway.
 	auto sourceUnitName = uriToSourceUnitName(_uri);
+	lspDebug(fmt::format("FileRepository.setSourceByUri({}): {}", _uri, _source));
 	m_sourceUnitNamesToUri.emplace(sourceUnitName, _uri);
 	m_sourceCodes[sourceUnitName] = std::move(_source);
 }
@@ -118,7 +124,7 @@ Result<boost::filesystem::path> FileRepository::tryResolvePath(std::string const
 		boost::filesystem::path canonicalPath = boost::filesystem::path(prefix) / boost::filesystem::path(_strippedSourceUnitName);
 
 		if (boost::filesystem::exists(canonicalPath))
-			candidates.push_back(move(canonicalPath));
+			candidates.push_back(std::move(canonicalPath));
 	}
 
 	if (candidates.empty())
@@ -163,7 +169,7 @@ frontend::ReadCallback::Result FileRepository::readFile(string const& _kind, str
 		auto contents = readFileAsString(resolvedPath.get());
 		solAssert(m_sourceCodes.count(_sourceUnitName) == 0, "");
 		m_sourceCodes[_sourceUnitName] = contents;
-		return ReadCallback::Result{true, move(contents)};
+		return ReadCallback::Result{true, std::move(contents)};
 	}
 	catch (std::exception const& _exception)
 	{

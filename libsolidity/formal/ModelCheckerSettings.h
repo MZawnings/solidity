@@ -140,6 +140,21 @@ struct ModelCheckerTargets
 	std::set<VerificationTargetType> targets;
 };
 
+struct ModelCheckerExtCalls
+{
+	enum class Mode
+	{
+		UNTRUSTED,
+		TRUSTED
+	};
+
+	Mode mode = Mode::UNTRUSTED;
+
+	static std::optional<ModelCheckerExtCalls> fromString(std::string const& _mode);
+
+	bool isTrusted() const { return mode == Mode::TRUSTED; }
+};
+
 struct ModelCheckerSettings
 {
 	ModelCheckerContracts contracts = ModelCheckerContracts::Default();
@@ -151,9 +166,12 @@ struct ModelCheckerSettings
 	/// might prefer the precise encoding.
 	bool divModNoSlacks = false;
 	ModelCheckerEngine engine = ModelCheckerEngine::None();
+	ModelCheckerExtCalls externalCalls = {};
 	ModelCheckerInvariants invariants = ModelCheckerInvariants::Default();
+	bool showProvedSafe = false;
 	bool showUnproved = false;
-	smtutil::SMTSolverChoice solvers = smtutil::SMTSolverChoice::All();
+	bool showUnsupported = false;
+	smtutil::SMTSolverChoice solvers = smtutil::SMTSolverChoice::Z3();
 	ModelCheckerTargets targets = ModelCheckerTargets::Default();
 	std::optional<unsigned> timeout;
 
@@ -164,8 +182,11 @@ struct ModelCheckerSettings
 			contracts == _other.contracts &&
 			divModNoSlacks == _other.divModNoSlacks &&
 			engine == _other.engine &&
+			externalCalls.mode == _other.externalCalls.mode &&
 			invariants == _other.invariants &&
+			showProvedSafe == _other.showProvedSafe &&
 			showUnproved == _other.showUnproved &&
+			showUnsupported == _other.showUnsupported &&
 			solvers == _other.solvers &&
 			targets == _other.targets &&
 			timeout == _other.timeout;

@@ -30,6 +30,8 @@
 
 #include <liblangutil/Exceptions.h>
 
+#include <libevmasm/Instruction.h>
+
 #include <range/v3/view/reverse.hpp>
 
 #include <range/v3/algorithm/max.hpp>
@@ -64,9 +66,9 @@ CodeTransform::CodeTransform(
 	m_builtinContext(_builtinContext),
 	m_allowStackOpt(_allowStackOpt),
 	m_useNamedLabelsForFunctions(_useNamedLabelsForFunctions),
-	m_identifierAccessCodeGen(move(_identifierAccessCodeGen)),
-	m_context(move(_context)),
-	m_delayedReturnVariables(move(_delayedReturnVariables)),
+	m_identifierAccessCodeGen(std::move(_identifierAccessCodeGen)),
+	m_context(std::move(_context)),
+	m_delayedReturnVariables(std::move(_delayedReturnVariables)),
 	m_functionExitLabel(_functionExitLabel)
 {
 	if (!m_context)
@@ -406,11 +408,11 @@ void CodeTransform::operator()(FunctionDefinition const& _function)
 	if (!m_allowStackOpt)
 		subTransform.setupReturnVariablesAndFunctionExit();
 
-	subTransform.m_assignedNamedLabels = move(m_assignedNamedLabels);
+	subTransform.m_assignedNamedLabels = std::move(m_assignedNamedLabels);
 
 	subTransform(_function.body);
 
-	m_assignedNamedLabels = move(subTransform.m_assignedNamedLabels);
+	m_assignedNamedLabels = std::move(subTransform.m_assignedNamedLabels);
 
 	m_assembly.setSourceLocation(originLocationOf(_function));
 	if (!subTransform.m_stackErrors.empty())
@@ -666,10 +668,9 @@ bool statementNeedsReturnVariableSetup(Statement const& _statement, vector<Typed
 		holds_alternative<Assignment>(_statement)
 	)
 	{
-		ReferencesCounter referencesCounter{ReferencesCounter::CountWhat::OnlyVariables};
-		referencesCounter.visit(_statement);
-		auto isReferenced = [&referencesCounter](TypedName const& _returnVariable) {
-			return referencesCounter.references().count(_returnVariable.name);
+		map<YulString, size_t> references = VariableReferencesCounter::countReferences(_statement);
+		auto isReferenced = [&references](TypedName const& _returnVariable) {
+			return references.count(_returnVariable.name);
 		};
 		if (ranges::none_of(_returnVariables, isReferenced))
 			return false;

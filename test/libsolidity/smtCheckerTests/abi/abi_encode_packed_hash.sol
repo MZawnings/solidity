@@ -11,7 +11,7 @@ contract C {
 }
 // ====
 // SMTEngine: all
+// SMTIgnoreOS: macos
 // ----
-// Warning 1218: (281-319): CHC: Error trying to invoke SMT solver.
-// Warning 6328: (281-319): CHC: Assertion violation might happen here.
-// Warning 4661: (281-319): BMC: Assertion violation happens here.
+// Warning 6328: (281-319): CHC: Assertion violation happens here.
+// Info 1391: CHC: 1 verification condition(s) proved safe! Enable the model checker option "show proved safe" to see all of them.
